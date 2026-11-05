@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Nyanroid" parent="android:Theme.Material.NoActionBar">
+        <item name="android:colorAccent">#FF6FA8DC</item>
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+    <style name="Theme.Nyanroid.Fullscreen">
+        <item name="android:windowFullscreen">true</item>
+    </style>
+</resources>

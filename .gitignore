@@ -1,0 +1,38 @@
+# Build output
+/build*/
+/out/
+*.o
+*.so
+*.a
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.gradle/
+local.properties
+
+# Android / Gradle
+/android/.gradle/
+/android/.kotlin/
+/android/build/
+/android/app/build/
+/android/app/.cxx/
+/android/local.properties
+
+# Downloaded library sources (FFmpeg, cmake/ffmpeg.cmake)
+/third_party/downloads/
+
+# Assets extracted for inspection
+/extracted/
+
+# Fonts for your own builds stay local: most fonts' licences forbid passing them on (fonts/README.md)
+/fonts/*
+!/fonts/README.md
+
+# Game-dependent tests and tools, if you keep a companion repository here (CMakeLists.txt)
+/private/
+
+# Local tool state
+/.claude/
+__pycache__/
