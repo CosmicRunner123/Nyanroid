@@ -1,6 +1,7 @@
 #include "nyan/render/diesel_session.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -358,7 +359,18 @@ private:
             queueing_ = true;
             return;
         }
+        // A release in the frame its press went in waits for a frame: a tap (whose press goes in as the
+        // finger lifts) or a trackpad tap is a quick click, as a mouse's is, never shorter than a
+        // frame. Mware's queue (Mouse) keeps a press and release given between two updates both, and
+        // then reports the release for two updates, so a button that opens a menu on the release
+        // would have the menu see the same release and close it again (Mojika's settings).
+        if (!down && b >= 0 && b < 3 && pressFrame_[b] == frameNumber()) {
+            queued_.push_back({Input::Button, sentX_, sentY_, b, down});
+            queueing_ = true;
+            return;
+        }
         host_->mouseButtonEvent(b, down);
+        if (down && b >= 0 && b < 3) pressFrame_[b] = frameNumber();
         if (b == 0) leftHeld_ = down;
     }
     // A held touch press handed on: down where the finger landed (seen there since), then the pointer
@@ -509,6 +521,7 @@ private:
     // as the last frame saw it, whether the host holds the left button, and what waits for a frame.
     int sentX_ = 0, sentY_ = 0, seenX_ = 0, seenY_ = 0;
     bool leftHeld_ = false;
+    std::array<uint64_t, 3> pressFrame_{UINT64_MAX, UINT64_MAX, UINT64_MAX};  // the frame each button's press went in
     bool queueing_ = false;
     std::vector<Input> queued_;
     // A touch's left press held back (see mouseButton): where the finger landed and is now (view and
