@@ -647,6 +647,7 @@ Renderer::~Renderer() {
     glDeleteTextures(1, &atlas_);
     if (shadowFbo_) glDeleteFramebuffers(1, &shadowFbo_);
     if (shadowTex_) glDeleteTextures(1, &shadowTex_);
+    shadowW_ = shadowH_ = 0;
     glDeleteSamplers(1, &samplerNearest_);
     glDeleteSamplers(1, &samplerLinear_);
     glDeleteSamplers(1, &samplerRepeat_);
@@ -954,18 +955,25 @@ bool Renderer::drawGlyph(const diesel::DrawItem& d, float dx, float dy, const fl
 
 // A text's shadow (CText 0x4d92a0 / 0x4d9300 / 0x4d94a0): its target cleared to white with alpha 0,
 // the glyphs drawn white at their offsets with the render target's blend (their alpha adds up,
-// clamped), then the target over the frame as a sprite in the shadow's colour and alpha. The glyphs
+// clamped), then the target over the frame as a sprite in the shadow's colour and alpha. The shadow's
+// target is the size of the one the text is drawn on: `setSurface` makes it again at its surface's
+// size (0x4d6190: the size the surface's +0xbc gives, the graphics' +0x74 making the target, +0x98
+// its sprite), and the sprite covers the whole target it is drawn on (0x4d94a0: the quad from -1 to 1),
+// so the shadow lies on the text's target pixel for pixel. Nyanroid keeps one buffer as large as the
+// largest such target and uses its corner. The glyphs
 // go through the glyph batches, whose material has the text's mask (CText::setMask 0x4d8100 hands
 // it to both): the mask clips the shadow's glyphs on the shadow's target, and the sprite laid over
 // the frame (+0x788, never given the mask) shows only what they left. Phantom's backlog hides the
 // lines scrolled out of its window this way.
 void Renderer::drawShadow(const diesel::DrawItem& d) {
     const diesel::ShadowBatch& batch = *d.shadow;
-    if (!shadowTex_) {
-        glGenTextures(1, &shadowTex_);
+    if (!shadowTex_ || shadowW_ < currentW_ || shadowH_ < currentH_) {
+        if (!shadowTex_) glGenTextures(1, &shadowTex_);
+        if (!shadowFbo_) glGenFramebuffers(1, &shadowFbo_);
+        shadowW_ = std::max(shadowW_, currentW_);
+        shadowH_ = std::max(shadowH_, currentH_);
         glBindTexture(GL_TEXTURE_2D, shadowTex_);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, screenW_, screenH_, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-        glGenFramebuffers(1, &shadowFbo_);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, shadowW_, shadowH_, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
         glBindFramebuffer(GL_FRAMEBUFFER, shadowFbo_);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, shadowTex_, 0);
     }
@@ -1007,9 +1015,9 @@ void Renderer::drawShadow(const diesel::DrawItem& d) {
     glUniform1i(uGlyph_, 0);
     glUniform1i(uTextured_, 1);
     glBindTexture(GL_TEXTURE_2D, shadowTex_);
-    // The shadow target is the screen's size; a smaller target uses its corner.
+    // The corner of the buffer that is the target's size, laid over the whole target.
     const float w = static_cast<float>(currentW_), h = static_cast<float>(currentH_);
-    const float su = w / static_cast<float>(screenW_), sv = h / static_cast<float>(screenH_);
+    const float su = w / static_cast<float>(shadowW_), sv = h / static_cast<float>(shadowH_);
     const auto& c = batch.color;
     Vertex v[4] = {{0, 0, 1, 0, 0, c[0], c[1], c[2], c[3]},
                    {w, 0, 1, su, 0, c[0], c[1], c[2], c[3]},

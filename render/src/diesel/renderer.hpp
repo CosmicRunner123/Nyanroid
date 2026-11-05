@@ -98,6 +98,7 @@ private:
     bool bindMask(const diesel::DrawItem& d);
     void drawShadow(const diesel::DrawItem& d);
     GLuint shadowTex_ = 0, shadowFbo_ = 0;
+    int shadowW_ = 0, shadowH_ = 0;  // the shadow buffer's size: the largest target a shadow was drawn on
     void releaseIdle();
     // The material's texture filters (DrawItem::filter) on a texture `w` x `h`: the filtered picture
     // (one of two buffers kept at the last size), or `src` when none runs. Leaves the frame's
