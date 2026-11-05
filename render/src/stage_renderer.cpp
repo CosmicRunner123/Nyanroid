@@ -1354,7 +1354,7 @@ StageRenderer::PlaneVideo* StageRenderer::planeVideo(int32_t n, const cs2::Plane
         // Scripts name the clip with or without its extension (`michiru_ed_b.mpg`).
         std::string file = p.video;
         if (!(file.size() > 4 && file.compare(file.size() - 4, 4, ".mpg") == 0)) file += ".mpg";
-        if (auto ref = assets_.find(file)) v.video = media::MpegVideo::open(ref->archive->read(*ref->entry));
+        if (auto ref = assets_.find(file)) v.video = media::MpegVideo::open(ref->archive->openEntry(*ref->entry));
         if (!v.video) {
             missingTextures_[p.video + ".mpg"] = true;
             return nullptr;

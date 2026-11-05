@@ -814,17 +814,22 @@ int measureMovie(Video& video, double seconds) {
     double sum = 0;
     size_t samples = 0;
     int frame = 0;
+    uint64_t hash = 14695981039346656037ull;  // FNV-1a of every picture shown, in order
     for (; frame < static_cast<int>(seconds * 60) && !video.ended(); ++frame) {
         auto t0 = std::chrono::steady_clock::now();
-        if (video.seek(frame / 60.0)) ++pictures;
+        if (video.seek(frame / 60.0)) {
+            ++pictures;
+            for (size_t i = 0; i < video.rgba().size(); i += 61) hash = (hash ^ video.rgba()[i]) * 1099511628211ull;
+        }
         double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
         worst = std::max(worst, ms), total += ms;
         mixer.render(buf.data(), 800);
         for (float v : buf) sum += v * v;
         samples += buf.size();
     }
-    std::printf("%d game frames, %d pictures, decode avg %.2f ms worst %.2f ms, sound RMS %.3f%s\n", frame, pictures,
-                total / std::max(1, frame), worst, std::sqrt(sum / std::max<size_t>(1, samples)), video.ended() ? ", ended" : "");
+    std::printf("%d game frames, %d pictures, decode avg %.2f ms worst %.2f ms, sound RMS %.3f%s, pictures hash %016llx\n", frame,
+                pictures, total / std::max(1, frame), worst, std::sqrt(sum / std::max<size_t>(1, samples)),
+                video.ended() ? ", ended" : "", static_cast<unsigned long long>(hash));
     return 0;
 }
 
@@ -838,7 +843,7 @@ int cmdMovie(const std::string& dir, const std::string& name, double seconds) {
         return 1;
     }
     if (name.ends_with(".mpg")) {
-        auto video = media::MpegVideo::open(ref->archive->read(*ref->entry));
+        auto video = media::MpegVideo::open(ref->archive->openEntry(*ref->entry));
         if (!video) {
             std::fprintf(stderr, "%s: not an MPEG-1 stream\n", name.c_str());
             return 1;

@@ -622,8 +622,8 @@ bool Game::startMovie(const std::string& name, int32_t skipMode, int32_t volume)
     // The scripts name a movie without its extension; the engine plays the kinds its DirectShow
     // setup knows (cs2.exe 0x6fcc40, by extension: mpg, mpa, mpv, dat, avi, mov, wav, wmv, webm,
     // ogv, hap), so take the first of those movie.int has. MPEG-1 decodes with pl_mpeg, the rest
-    // with FFmpeg (Nekopara's WMV), read from the archive as it plays. One that can't be read is
-    // skipped.
+    // with FFmpeg (Nekopara's WMV), both read from the archive as it plays. One that can't be read
+    // is skipped.
     static constexpr const char* kKinds[] = {"mpg", "mpa", "mpv", "dat", "avi", "mov", "wav", "wmv", "webm", "ogv", "hap"};
     std::optional<AssetRef> ref;
     std::string ext;
@@ -636,7 +636,7 @@ bool Game::startMovie(const std::string& name, int32_t skipMode, int32_t volume)
         if ((ref = assets_.find(name + "." + k))) ext = k;
     }
     movie_ = Movie{};
-    if (ref && ext == "mpg") movie_.mpeg = media::MpegVideo::open(ref->archive->read(*ref->entry));
+    if (ref && ext == "mpg") movie_.mpeg = media::MpegVideo::open(ref->archive->openEntry(*ref->entry));
     else if (ref) movie_.ffmpeg = media::FfmpegVideo::open(ref->archive->openEntry(*ref->entry));
     if (!movie_.open()) {
         std::fprintf(stderr, "movie %s: %s\n", name.c_str(), ref ? "cannot be decoded" : "not found");
