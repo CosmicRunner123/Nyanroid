@@ -19,8 +19,8 @@ android {
         if (appIdSuffix.isNotEmpty()) resValue("string", "app_name", "Nyanroid ${appIdSuffix.removePrefix(".")}")
         minSdk = 27  // Android 8.1, the first with a dependable AAudio; newer calls check the version
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 3
+        versionName = "0.3.0"
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
