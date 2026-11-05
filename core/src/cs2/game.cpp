@@ -1035,11 +1035,11 @@ void Game::playScene(const std::string& scene) {
 void Game::execKcs(const std::string& name) {
     // `execkcs <program>` runs one of the game's kcs programs. sscript is the story; movie.kcs
     // plays the movie a screen script names (Amakano's logo screen: the opening); call_config.kcs runs
-    // the config screen (Nekopara's title). Programs not emulated (export, ImgExport, tweet: file
-    // exports and web links) end at once; they must not start the story.
+    // the config screen (Nekopara's title). Programs not emulated (export, ImgExport, imgimport,
+    // tweet: file exports and imports, web links) end at once; they must not start the story.
     const std::string program = toLowerAscii(name);
     if (program != "sscript") {
-        kcsExit_ = 0;
+        if (program == "movie" || program == "call_config") kcsExit_ = 0;
         if (program == "movie") {
             // adv.xml: the file in sysstr/movie, its volume in sysflag/movie_vol, whether a
             // click may cancel it in sysflag/movie_cancel.
@@ -1160,7 +1160,28 @@ void Game::runResidentCommands() {
     }
 }
 
-void Game::endKcs() {
+int32_t Game::kcsExitCode(const std::string& name) {
+    const std::string program = toLowerAscii(name);
+    if (program == "sscript") return sceneRunning_ ? -1 : kcsExit_;
+    if (program == "movie") return kcsMovie_ ? -1 : kcsExit_;
+    if (program == "call_config") return kcsScreen_ ? -1 : kcsExit_;
+    return 0;  // not emulated: it ended at once
+}
+
+void Game::endKcs(const std::string& name) {
+    // `endkcs` deletes the program the calling script started, nothing else (cs2.exe request 5,
+    // 0x5b4cc0: the script's own kcs slot). Amakano+'s character viewer starts an image import
+    // from inside the story and ends it so; ending the story there freed the running viewer.
+    const std::string program = toLowerAscii(name);
+    if (program == "movie") {
+        if (kcsMovie_) endMovie();
+        return;
+    }
+    if (program == "call_config") {
+        if (std::exchange(kcsScreen_, false)) systemScreen_.reset();
+        return;
+    }
+    if (program != "sscript") return;  // not emulated: nothing runs
     if (kcsMovie_) endMovie();
     residents_.clear();  // sscript's tasks end with it
     if (std::exchange(kcsScreen_, false)) systemScreen_.reset();  // the program's task is deleted
@@ -1178,7 +1199,7 @@ void Game::retTitle() {
     // The story (if running) ends and flow.fes starts over from #START, which reads the flags the
     // menus set: load a slot, quit, or go to the title. Deferred: the caller is still running.
     // (No global save here: those request flags are only meant to live until #START reads them.)
-    endKcs();
+    endKcs("sscript");
     kcsExit_ = 0;
     vars_.set(retTitleFlag_, 1);
     restartFlow_ = flow_ != nullptr;

@@ -83,8 +83,8 @@ public:
 
     // FesInstance::Host
     void execKcs(const std::string& name) override;
-    void endKcs() override;
-    int32_t kcsExitCode() override { return sceneRunning_ || kcsMovie_ || kcsScreen_ ? -1 : kcsExit_; }
+    void endKcs(const std::string& name) override;
+    int32_t kcsExitCode(const std::string& name) override;
     void retTitle() override;
     void changeCursor(const std::string& name) override;
     void baseImage(std::vector<FesQuad> quads) override { baseImage_ = std::move(quads); }

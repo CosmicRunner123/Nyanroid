@@ -67,10 +67,14 @@ public:
     // Engine services a script can request: running the scene engine (`execkcs sscript`).
     struct Host {
         virtual ~Host() = default;
+        // `execkcs <program>` starts a kcs program in the script's own slot (cs2.exe request 4,
+        // 0x5b4cc0: one per script); `endkcs` deletes that one (request 5), and the script's
+        // `_EXITCODE_` is that program's (read from its slot each update). So each call names the
+        // program the script started.
         virtual void execKcs(const std::string& name) = 0;
-        virtual void endKcs() = 0;
-        // Exit code of the scene engine: -1 while running or never started.
-        virtual int32_t kcsExitCode() = 0;
+        virtual void endKcs(const std::string& name) = 0;
+        // The program's exit code: -1 while it runs.
+        virtual int32_t kcsExitCode(const std::string& name) = 0;
         // `rettitle`: leave the story and go back to the title screen.
         virtual void retTitle() {}
         // `xchgcursor [name]`: the mouse cursor becomes cursor.xml's `name` (`default` without one).
@@ -610,6 +614,7 @@ private:
     std::unique_ptr<FesInstance> child_;  // `execfes`
     enum class Launched : uint8_t { None, Fes, Kcs } launched_ = Launched::None;
     bool kcsRunning_ = false;  // this script's `execkcs` program is running (the one `endkcs` ends)
+    std::string kcsProgram_;   // the program this script last started
     size_t blockStart_ = 0;  // start of the main block, re-run every frame when it ends
     size_t blockEnd_ = 0;    // and its end (an empty block, `#WAIT` right above `#EXIT`, stays empty)
     int32_t exitCodeOfLaunched();

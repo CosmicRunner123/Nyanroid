@@ -1819,8 +1819,8 @@ void testFesWaitTiming() {
     struct TestHost final : nyan::cs2::FesInstance::Host {
         bool held = false;
         void execKcs(const std::string&) override {}
-        void endKcs() override {}
-        int32_t kcsExitCode() override { return -1; }
+        void endKcs(const std::string&) override {}
+        int32_t kcsExitCode(const std::string&) override { return -1; }
         bool forceSkipHeld() override { return held; }
     } host;
     const nyan::cs2::AssetIndex assets;  // no archives: the objects have no images

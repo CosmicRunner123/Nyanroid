@@ -595,7 +595,7 @@ void FesInstance::jump(const std::string& target, bool call) {
 
 int32_t FesInstance::exitCodeOfLaunched() {
     if (launched_ == Launched::Fes) return child_ && child_->exited() ? child_->exitCode() : -1;
-    if (launched_ == Launched::Kcs) return host_ ? host_->kcsExitCode() : -1;
+    if (launched_ == Launched::Kcs) return host_ ? host_->kcsExitCode(kcsProgram_) : -1;
     return -1;
 }
 
@@ -1028,6 +1028,7 @@ bool FesInstance::execute(const FesScript::Statement& st) {
     if (k == "execkcs" && t.size() >= 2) {
         if (log && std::getenv("NYAN_FES_TRACE")) log("fes " + name_ + ": execkcs " + t[1]);
         if (host_) host_->execKcs(t[1]);
+        kcsProgram_ = t[1];
         launched_ = Launched::Kcs;
         kcsRunning_ = true;
         return true;
@@ -1037,7 +1038,7 @@ bool FesInstance::execute(const FesScript::Statement& st) {
         // the script's queue, 0x7155f0, carried out at 0x5b4cc0 on the script's own kcs slot).
         // A screen that started none (Amakano 2's config pages and message window, which say
         // `endkcs` before opening a dialog) leaves the story alone.
-        if (std::exchange(kcsRunning_, false) && host_) host_->endKcs();
+        if (std::exchange(kcsRunning_, false) && host_) host_->endKcs(kcsProgram_);
         return true;
     }
     if (k == "sysvoice" && t.size() >= 2) {
