@@ -14,12 +14,16 @@ constexpr const char* kKeyEntryName = "__key__.dat";
 
 }  // namespace
 
-void unobfuscateKifName(std::string& name, uint32_t seed) {
+int kifNameKey(uint32_t seed) {
+    uint32_t mt = MersenneTwister::first(seed);
+    return static_cast<uint8_t>((mt >> 24) + (mt >> 16) + (mt >> 8) + mt) % 52;
+}
+
+void unobfuscateKifName(std::string& name, uint32_t seed) { unobfuscateKifNameWithKey(name, kifNameKey(seed)); }
+
+void unobfuscateKifNameWithKey(std::string& name, int key) {
     constexpr int kLength = 52;
     constexpr int kHalf = 26;
-    uint32_t mt = MersenneTwister::first(seed);
-    int key = static_cast<uint8_t>((mt >> 24) + (mt >> 16) + (mt >> 8) + mt) % kLength;
-
     for (char& ch : name) {
         auto c = static_cast<uint8_t>(ch);
         bool upper = c >= 'A' && c <= 'Z';
@@ -32,6 +36,25 @@ void unobfuscateKifName(std::string& name, uint32_t seed) {
         }
         key = (key + 1) % kLength;
     }
+}
+
+std::vector<std::string> KifArchive::rawNames(const RandomAccessFile& file, bool& encrypted) {
+    encrypted = false;
+    if (file.size() < 8) return {};
+    Bytes header = file.readAt(0, 8);
+    if (std::memcmp(header.data(), "KIF\0", 4) != 0) return {};
+    uint32_t count = readLE32(header.data() + 4);
+    if (static_cast<uint64_t>(count) * kEntrySize + 8 > file.size()) return {};
+    Bytes table = file.readAt(8, count * kEntrySize);
+    ByteReader r(table, "KIF entry table");
+    std::vector<std::string> names(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        names[i] = r.fixedString(64);
+        r.u32();
+        r.u32();
+        if (names[i] == kKeyEntryName) encrypted = true;
+    }
+    return names;
 }
 
 std::unique_ptr<KifArchive> KifArchive::open(std::unique_ptr<RandomAccessFile> file, std::string archiveName,

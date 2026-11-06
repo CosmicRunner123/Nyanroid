@@ -17,6 +17,7 @@ add_library(nyan_core STATIC
   src/cs2/pe_resources.cpp
   src/cs2/vcodes.cpp
   src/cs2/kif_archive.cpp
+  src/cs2/kif_seed_search.cpp
   src/cs2/asset_index.cpp
   src/cs2/hg_image.cpp
   src/cs2/cst_scene.cpp

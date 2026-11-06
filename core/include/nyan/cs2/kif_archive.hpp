@@ -23,6 +23,10 @@ public:
     static std::unique_ptr<KifArchive> open(std::unique_ptr<RandomAccessFile> file, std::string archiveName,
                                             std::optional<uint32_t> tocSeed);
 
+    // The entry names as the table stores them (obfuscated when the archive is encrypted: name i
+    // is unobfuscated with the names' seed + i), and whether the archive is encrypted.
+    static std::vector<std::string> rawNames(const RandomAccessFile& file, bool& encrypted);
+
     const std::string& name() const { return name_; }
     const std::vector<KifEntry>& entries() const { return entries_; }
     bool encrypted() const { return blowfish_.has_value(); }
@@ -44,5 +48,8 @@ private:
 
 // Unobfuscates a KIF entry name in place (Beaufort-style letter substitution).
 void unobfuscateKifName(std::string& name, uint32_t seed);
+// The substitution's first key for a seed (0-51), and the substitution from that key.
+int kifNameKey(uint32_t seed);
+void unobfuscateKifNameWithKey(std::string& name, int key);
 
 }  // namespace nyan::cs2

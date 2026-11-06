@@ -36,6 +36,7 @@ class GameActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        NativeBridge.setDataDirectory(filesDir.absolutePath)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val uri = Uri.parse(intent.getStringExtra(EXTRA_FOLDER) ?: run { finish(); return })
         val folder = SafFolder(contentResolver, uri)

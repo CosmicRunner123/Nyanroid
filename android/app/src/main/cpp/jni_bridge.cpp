@@ -9,6 +9,8 @@
 
 #include "aaudio_output.hpp"
 #include "nyan/common/engine.hpp"
+#include "nyan/cs2/asset_index.hpp"
+#include "nyan/cs2/kif_seed_search.hpp"
 #include "nyan/render/session.hpp"
 #include "saf_folder.hpp"
 
@@ -91,6 +93,34 @@ JNIEXPORT jstring JNICALL Java_dev_nyanroid_NativeBridge_detectEngine(JNIEnv* en
         LOGE("detectEngine: %s", e.what());
     }
     return nullptr;
+}
+
+// Where the engine keeps what it works out once per game: the archive key a protected exe hides.
+JNIEXPORT void JNICALL Java_dev_nyanroid_NativeBridge_setDataDirectory(JNIEnv* env, jobject, jstring dir) {
+    nyan::cs2::setKifSeedCacheDirectory(toStd(env, dir));
+}
+
+// Whether starting the game in a folder first works out its archives' key (its exe hides it, and
+// it was not found before): seconds, so the library says so and calls findArchiveKey first.
+JNIEXPORT jboolean JNICALL Java_dev_nyanroid_NativeBridge_needsArchiveKeySearch(JNIEnv* env, jobject, jobject folder) {
+    try {
+        SafGameFolder f(env, folder);
+        if (nyan::detectEngine(f) != nyan::Engine::CatSystem2) return JNI_FALSE;
+        return nyan::cs2::AssetIndex::needsSeedSearch(f) ? JNI_TRUE : JNI_FALSE;
+    } catch (const std::exception& e) {
+        LOGE("needsArchiveKeySearch: %s", e.what());
+    }
+    return JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL Java_dev_nyanroid_NativeBridge_findArchiveKey(JNIEnv* env, jobject, jobject folder) {
+    try {
+        SafGameFolder f(env, folder);
+        const auto index = nyan::cs2::AssetIndex::load(f);  // works the key out and keeps it
+        if (index.tocSeed()) LOGI("archive key found: %08x", static_cast<unsigned>(*index.tocSeed()));
+    } catch (const std::exception& e) {
+        LOGE("findArchiveKey: %s", e.what());
+    }
 }
 
 // The fonts the game names that neither it nor the font folders (newline-separated) have, which

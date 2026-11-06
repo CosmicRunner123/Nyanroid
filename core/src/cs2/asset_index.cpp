@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 
+#include "nyan/cs2/kif_seed_search.hpp"
 #include "nyan/cs2/psb.hpp"
 
 namespace nyan::cs2 {
@@ -33,12 +34,9 @@ std::string AssetIndex::normalizeName(std::string_view sjis) {
     return out;
 }
 
-AssetIndex AssetIndex::load(const GameFolder& folder) {
-    AssetIndex index;
-    index.vcodes_ = findVCodes(folder);
-    std::optional<uint32_t> tocSeed;
-    if (index.vcodes_) tocSeed = index.vcodes_->tocSeed();
+namespace {
 
+std::vector<std::string> archiveNames(const GameFolder& folder) {
     std::vector<std::string> base, updates;
     for (const auto& name : folder.list()) {
         std::string lower = toLowerAscii(name);
@@ -49,6 +47,60 @@ AssetIndex AssetIndex::load(const GameFolder& folder) {
     std::sort(base.begin(), base.end(), byLower);
     std::sort(updates.begin(), updates.end(), byLower);
     base.insert(base.end(), updates.begin(), updates.end());
+    return base;
+}
+
+// The names of the encrypted archive with the most entries, as stored, or none.
+std::vector<std::string> largestEncryptedTable(const GameFolder& folder, const std::vector<std::string>& archives) {
+    std::vector<std::string> largest;
+    for (const auto& name : archives) {
+        auto file = folder.open(name);
+        if (!file) continue;
+        bool encrypted = false;
+        auto names = KifArchive::rawNames(*file, encrypted);
+        if (encrypted && names.size() > largest.size()) largest = std::move(names);
+    }
+    return largest;
+}
+
+// A V_CODE as the exes store them: readable text ("NXT-N0VZCG13"). Decrypted from a protected
+// exe's packed resources it is not.
+bool readableCode(const std::string& code) {
+    return !code.empty() && std::all_of(code.begin(), code.end(), [](char c) { return c >= 0x20 && c < 0x7f; });
+}
+
+// The engine unobfuscates the names with the CRC of its exe's V_CODE2 (vcodeSeed). A protected
+// exe keeps its resources packed, so the V_CODE2 read from the file is not readable and gives
+// names that are not file names: then the seed is the one that does (found once, then cached).
+std::optional<uint32_t> namesSeed(const GameFolder& folder, const std::vector<std::string>& archives,
+                                  const std::optional<VCodes>& vcodes, bool& searched) {
+    searched = false;
+    if (vcodes && readableCode(vcodes->vcode2)) return vcodes->tocSeed();
+    std::optional<uint32_t> seed;
+    if (vcodes) seed = vcodes->tocSeed();
+    const std::vector<std::string> table = largestEncryptedTable(folder, archives);
+    if (table.empty() || (seed && kifSeedFits(table, *seed))) return seed;
+    searched = true;
+    if (auto found = findKifSeed(table)) return found;
+    return seed;
+}
+
+}  // namespace
+
+bool AssetIndex::needsSeedSearch(const GameFolder& folder) {
+    const auto vcodes = findVCodes(folder);
+    if (vcodes && readableCode(vcodes->vcode2)) return false;
+    const std::vector<std::string> table = largestEncryptedTable(folder, archiveNames(folder));
+    if (table.empty() || (vcodes && kifSeedFits(table, vcodes->tocSeed()))) return false;
+    return !kifSeedCached(table);
+}
+
+AssetIndex AssetIndex::load(const GameFolder& folder) {
+    AssetIndex index;
+    index.vcodes_ = findVCodes(folder);
+    const std::vector<std::string> base = archiveNames(folder);
+    const std::optional<uint32_t> tocSeed = namesSeed(folder, base, index.vcodes_, index.tocSeedSearched_);
+    index.tocSeed_ = tocSeed;
 
     for (const auto& name : base) {
         auto file = folder.open(name);

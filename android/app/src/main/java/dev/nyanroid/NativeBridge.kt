@@ -1,7 +1,8 @@
 package dev.nyanroid
 
 /** JNI entry points into the C++ engine (libnyanroid.so). All calls except the touch/skip
- *  setters and [detectEngine] must happen on the GL thread. */
+ *  setters and the library's checks ([detectEngine], [missingFonts], the archive key's) must
+ *  happen on the GL thread. */
 object NativeBridge {
     init {
         System.loadLibrary("nyanroid")
@@ -16,6 +17,14 @@ object NativeBridge {
     /** The fonts the game in [folder] names that neither it nor [fontDirs] (newline-separated) has,
      *  so Android's font would stand in; empty if none. Any thread (not the UI's: it reads files). */
     external fun missingFonts(folder: SafFolder, fontDirs: String): Array<String>
+    /** Where the engine keeps what it works out once per game (the archive key a protected exe
+     *  hides). Any thread; call before the others. */
+    external fun setDataDirectory(dir: String)
+    /** Whether starting the game in [folder] first works out its archives' key: its exe hides the
+     *  key and it was not found before. Then [findArchiveKey] takes seconds. Any thread but the UI's. */
+    external fun needsArchiveKeySearch(folder: SafFolder): Boolean
+    /** Works out the key and keeps it for later starts. Any thread but the UI's. */
+    external fun findArchiveKey(folder: SafFolder)
 
     /** Advances the simulation to real time and draws a frame. */
     external fun frame(handle: Long, width: Int, height: Int)

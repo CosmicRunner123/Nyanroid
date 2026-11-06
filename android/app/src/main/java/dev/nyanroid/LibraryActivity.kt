@@ -83,6 +83,7 @@ class LibraryActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        NativeBridge.setDataDirectory(filesDir.absolutePath)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(24), dp(24), dp(24), dp(24))
@@ -488,6 +489,25 @@ class LibraryActivity : Activity() {
         checkingFonts = true
         val key = uri.toString()
         Thread {
+            // A game whose exe hides its archives' key: work it out first (once), saying so.
+            val folder = SafFolder(contentResolver, uri)
+            if (NativeBridge.needsArchiveKeySearch(folder)) {
+                var notice: AlertDialog? = null
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        notice = AlertDialog.Builder(this)
+                            .setTitle("First start")
+                            .setMessage(
+                                "This game's program hides the key to its archives, so Nyanroid is working it out. " +
+                                    "This takes a few seconds, and only happens once."
+                            )
+                            .setCancelable(false)
+                            .show()
+                    }
+                }
+                NativeBridge.findArchiveKey(folder)
+                runOnUiThread { notice?.dismiss() }
+            }
             val fingerprint = Fonts.fingerprint(this)
             val skip = prefs.getBoolean("fontsNoWarn:$key", false) || prefs.getString("fontsOk:$key", null) == fingerprint
             val missing = if (skip) emptyArray() else try {

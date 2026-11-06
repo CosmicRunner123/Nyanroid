@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "nyan/audio/mixer.hpp"
+#include "nyan/cs2/kif_seed_search.hpp"
 #include "nyan/render/game_session.hpp"
 #include "nyan/render/gl.hpp"
 #include "nyan/render/session.hpp"
@@ -242,6 +243,12 @@ int main(int argc, char** argv) {
             }
         }
         so.saveDirectory = opt.saveDir.empty() ? defaultSaveDir(opt.gameDir) : opt.saveDir;
+        // Archive seeds found from the names (a protected exe's): ~/.local/share/nyanroid, or the
+        // --saves folder (a test run's).
+        if (!so.saveDirectory.empty()) {
+            cs2::setKifSeedCacheDirectory(opt.saveDir.empty() ? std::filesystem::path(so.saveDirectory).parent_path().string()
+                                                              : opt.saveDir);
+        }
         // User-supplied fonts (e.g. Windows system fonts a game names): ~/.local/share/nyanroid/fonts
         if (const char* home = std::getenv("HOME")) {
             so.fontDirectories.push_back(std::string(home) + "/.local/share/nyanroid/fonts");

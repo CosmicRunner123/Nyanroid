@@ -26,6 +26,13 @@ public:
     static AssetIndex load(const GameFolder& folder);
 
     const std::optional<VCodes>& vcodes() const { return vcodes_; }
+    // The seed the encrypted archives' names were unobfuscated with, and whether it was found from
+    // the names (the exe's V_CODE2 did not fit them: see kif_seed_search.hpp).
+    std::optional<uint32_t> tocSeed() const { return tocSeed_; }
+    bool tocSeedSearched() const { return tocSeedSearched_; }
+    // Whether loading the archives will search for their names' seed first (seconds): the exe's
+    // V_CODE2 does not fit them and no seed found before is cached.
+    static bool needsSeedSearch(const GameFolder& folder);
     const std::vector<std::unique_ptr<KifArchive>>& archives() const { return archives_; }
     size_t size() const { return lookup_.size(); }
 
@@ -48,6 +55,8 @@ public:
 
 private:
     std::optional<VCodes> vcodes_;
+    std::optional<uint32_t> tocSeed_;
+    bool tocSeedSearched_ = false;
     std::vector<std::unique_ptr<KifArchive>> archives_;
     std::unordered_map<std::string, AssetRef> lookup_;
     std::unordered_map<std::string, std::string> placeholders_;  // upper-case name -> value

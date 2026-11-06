@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -21,6 +22,7 @@
 #include "nyan/cs2/font_select.hpp"
 #include "nyan/cs2/message_text.hpp"
 #include "nyan/cs2/kif_archive.hpp"
+#include "nyan/cs2/kif_seed_search.hpp"
 #include "nyan/cs2/mersenne_twister.hpp"
 #include "nyan/cs2/particle.hpp"
 #include "nyan/cs2/save_data.hpp"
@@ -1461,6 +1463,23 @@ void testKifNameCipher() {
     CHECK_EQ(name, std::string("Hello_World.hg3"));
 }
 
+// A protected exe hides its V_CODE2: the names' seed is found from the names (a made-up table).
+void testKifSeedSearch() {
+    const uint32_t seed = 0x00012345;
+    std::vector<std::string> raw = {"__key__.dat"};
+    for (int i = 1; i <= 20; ++i) {
+        char n[32];
+        std::snprintf(n, sizeof n, i % 2 ? "bgm%03d.ogg" : "ev%03da.hg3", i);
+        raw.emplace_back(n);
+        nyan::cs2::unobfuscateKifName(raw.back(), seed + static_cast<uint32_t>(i));  // its own inverse
+    }
+    CHECK_EQ(nyan::cs2::kifSeedFits(raw, seed), true);
+    CHECK_EQ(nyan::cs2::kifSeedFits(raw, seed + 1), false);
+    CHECK_EQ(nyan::cs2::kifSeedCached(raw), false);
+    CHECK_EQ(nyan::cs2::findKifSeed(raw), std::optional<uint32_t>(seed));
+    CHECK_EQ(nyan::cs2::kifSeedCached(raw), true);
+}
+
 void testSjis() {
     CHECK_EQ(nyan::sjisToUtf8("abc\\x"), std::string("abc\\x"));
     // "あ" (0x82A0) and half-width katakana "ｱ" (0xB1).
@@ -1953,6 +1972,7 @@ int main() {
     testVCodeSeed();
     testBlowfish();
     testKifNameCipher();
+    testKifSeedSearch();
     testSjis();
     testEngineDetection();
     if (failures) {

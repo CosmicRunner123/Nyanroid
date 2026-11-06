@@ -121,11 +121,14 @@ int cmdInfo(const std::string& dir) {
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
 
     if (index.vcodes()) {
-        std::printf("Executable : %s\nV_CODE     : %s\nV_CODE2    : %s\nTOC seed   : 0x%08X\n",
-                    index.vcodes()->sourceFile.c_str(), index.vcodes()->vcode.c_str(),
-                    index.vcodes()->vcode2.c_str(), index.vcodes()->tocSeed());
+        std::printf("Executable : %s\nV_CODE     : %s\nV_CODE2    : %s\n", index.vcodes()->sourceFile.c_str(),
+                    index.vcodes()->vcode.c_str(), index.vcodes()->vcode2.c_str());
     } else {
         std::puts("V_CODE2    : (not found)");
+    }
+    if (index.tocSeed()) {
+        std::printf("TOC seed   : 0x%08X%s\n", *index.tocSeed(),
+                    index.tocSeedSearched() ? " (found from the archive names: the exe's V_CODE2 is unreadable)" : "");
     }
     std::printf("\n%-16s %9s  %s\n", "Archive", "Entries", "Encrypted");
     size_t total = 0;
