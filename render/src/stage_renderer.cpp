@@ -3219,7 +3219,13 @@ void StageRenderer::drawQuads(const std::vector<cs2::FesQuad>& quads) {
             continue;
         }
         const Texture* t = texture(q.texture);
-        if (t) quadCorners(Mode::Texture, t->id, c, q.u0, q.v0, q.u1, q.v1, 0xFFFFFFFF, q.alpha);
+        if (t) {
+            // The image's `tone`: each channel scaled; over 100% saturates (the target clamps).
+            const auto was = tone_;
+            for (int k = 0; k < 3; ++k) tone_[k] = q.tone[k] / 100.0f;
+            quadCorners(Mode::Texture, t->id, c, q.u0, q.v0, q.u1, q.v1, 0xFFFFFFFF, q.alpha);
+            tone_ = was;
+        }
         unclip();
     }
 }

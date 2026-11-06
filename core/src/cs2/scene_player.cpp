@@ -3734,30 +3734,35 @@ std::vector<std::string> ScenePlayer::resolveSprite(const std::string& spec) {
     auto it = spriteCache_.find(spec);
     if (it != spriteCache_.end()) return it->second;
 
+    std::vector<std::string> parts = spriteParts(assets_, spec);
+    if (parts.empty()) missing(spec + ".hg3");
+    spriteCache_[spec] = parts;
+    return parts;
+}
+
+std::vector<std::string> ScenePlayer::spriteParts(const AssetIndex& assets, const std::string& spec) {
     std::vector<std::string> parts;
     size_t comma = spec.find(',');
     if (comma == std::string::npos) {
-        if (assets_.find(spec + ".hg3")) parts.push_back(spec);
-    } else {
-        // `Base,a,b,c` -> Base_a, Base_0b, Base_00c, ... (argument k zero-padded to k digits)
-        std::string base = spec.substr(0, comma);
-        size_t k = 1;
-        size_t pos = comma + 1;
-        while (pos <= spec.size()) {
-            size_t next = spec.find(',', pos);
-            if (next == std::string::npos) next = spec.size();
-            std::string arg = spec.substr(pos, next - pos);
-            if (!arg.empty() && arg != "0") {
-                std::string padded = arg.size() < k ? std::string(k - arg.size(), '0') + arg : arg;
-                std::string name = base + "_" + padded;
-                if (assets_.find(name + ".hg3")) parts.push_back(name);
-            }
-            ++k;
-            pos = next + 1;
-        }
+        if (assets.find(spec + ".hg3")) parts.push_back(spec);
+        return parts;
     }
-    if (parts.empty()) missing(spec + ".hg3");
-    spriteCache_[spec] = parts;
+    // `Base,a,b,c` -> Base_a, Base_0b, Base_00c, ... (argument k zero-padded to k digits)
+    std::string base = spec.substr(0, comma);
+    size_t k = 1;
+    size_t pos = comma + 1;
+    while (pos <= spec.size()) {
+        size_t next = spec.find(',', pos);
+        if (next == std::string::npos) next = spec.size();
+        std::string arg = spec.substr(pos, next - pos);
+        if (!arg.empty() && arg != "0") {
+            std::string padded = arg.size() < k ? std::string(k - arg.size(), '0') + arg : arg;
+            std::string name = base + "_" + padded;
+            if (assets.find(name + ".hg3")) parts.push_back(name);
+        }
+        ++k;
+        pos = next + 1;
+    }
     return parts;
 }
 

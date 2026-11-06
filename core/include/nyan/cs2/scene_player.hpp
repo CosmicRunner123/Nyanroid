@@ -259,6 +259,11 @@ public:
     // The record a name makes (cs2.exe 0x790750): its comma-separated tokens, the first and second
     // joined by "_", then the first letter of each further one ("e_yuu01MN,1,1" -> "e_yuu01MN_1,1").
     static std::string cgKey(const std::string& name);
+    // The pictures an image name stands for: `Base,a,b,c` is Base_a, Base_0b, Base_00c, ...
+    // (argument k zero-padded to k digits; "0" and empty arguments add none), a name without a
+    // comma the picture itself; only the ones the archives hold. The scene's stand images and the
+    // FE character tables (CHTABLE3) build such names.
+    static std::vector<std::string> spriteParts(const AssetIndex& assets, const std::string& spec);
     // Whether a gallery entry has been recorded (0x7915b0: the same name and letters, exactly).
     bool cgEntrySeen(const std::string& entry) const { return cgSeen_.count(cgKey(entry)) != 0; }
     // The gallery group of that name (case-insensitive, cs2.exe 0x791b60), -1 if none.

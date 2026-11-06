@@ -72,6 +72,158 @@ std::string formatInts(const std::string& f, const int32_t* args, size_t n) {
     return out;
 }
 
+// The stand viewers' list files (Amakano 2's cs2.exe). Their text is taken as the game's (decoded
+// to UTF-8), which leaves the ASCII separators the engine looks for where they were.
+
+// A text file's lines (0x722b50): broken at "\r\n", "\r" or "\n"; empty ones kept.
+std::vector<std::string> textLines(const std::string& text) {
+    std::vector<std::string> lines;
+    size_t i = 0;
+    while (i < text.size()) {
+        const size_t end = text.find_first_of("\r\n", i);
+        if (end == std::string::npos) {
+            lines.push_back(text.substr(i));
+            break;
+        }
+        lines.push_back(text.substr(i, end - i));
+        i = end + 1;
+        if (text[end] == '\r' && i < text.size() && text[i] == '\n') ++i;
+    }
+    return lines;
+}
+
+// The pieces of a string between separators (0x63b290 / 0x63acb0): runs of the separator count as
+// one, and nothing is made of leading or trailing ones.
+std::vector<std::string> pieces(const std::string& s, char sep) {
+    std::vector<std::string> out;
+    size_t i = 0;
+    while (i < s.size()) {
+        if (s[i] == sep) {
+            ++i;
+            continue;
+        }
+        size_t end = s.find(sep, i);
+        if (end == std::string::npos) end = s.size();
+        out.push_back(s.substr(i, end - i));
+        i = end;
+    }
+    return out;
+}
+
+// A CSV file (0x6c02b0, comma mode): rows end at a line break; a field (0x6c0a40) ends at a comma,
+// or is quoted ("" for a quote, commas and line breaks inside it; the breaks are dropped), and
+// anything after its closing quote up to the next comma is skipped. An empty line is a row with
+// no fields.
+std::vector<std::vector<std::string>> parseCsv(const std::string& s) {
+    std::vector<std::vector<std::string>> rows;
+    size_t i = 0;
+    const size_t n = s.size();
+    while (i < n) {
+        std::vector<std::string> row;
+        while (i < n) {
+            if (s[i] == '\n') {
+                ++i;
+                break;
+            }
+            if (s[i] == '\r') {
+                ++i;
+                if (i < n && s[i] == '\n') ++i;
+                break;
+            }
+            std::string field;
+            const bool quoted = s[i] == '"';
+            if (quoted) ++i;
+            bool done = false;
+            while (i < n && s[i] != '\0' && !done) {
+                const char c = s[i];
+                if (c == '\n' || c == '\r') {
+                    if (!quoted) break;
+                    ++i;
+                    if (i < n && s[i] == (c == '\n' ? '\r' : '\n')) ++i;
+                } else if (c == '"') {
+                    if (i + 1 < n && s[i + 1] == '"') field += '"', i += 2;
+                    else done = true, ++i;
+                } else if (c == ',' && !quoted) {
+                    break;
+                } else {
+                    field += c, ++i;
+                }
+            }
+            while (i < n && s[i] != '\0' && s[i] != '\r' && s[i] != '\n') {
+                if (s[i++] == ',') break;
+            }
+            row.push_back(std::move(field));
+        }
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
+// A BGTABLE2's background mark, the first field of a background's row (0x952e40).
+constexpr const char* kBackgroundMark = "○";
+
+// The row of the n-th background (0x727fd0), -1 if there is none.
+int32_t backgroundRow(const std::vector<std::vector<std::string>>& rows, int32_t n) {
+    int32_t seen = 0;
+    for (size_t r = 0; r < rows.size(); ++r) {
+        if (rows[r].empty() || rows[r][0] != kBackgroundMark) continue;
+        if (seen++ == n) return static_cast<int32_t>(r);
+    }
+    return -1;
+}
+
+// A background's picture (0x727eb0 / 0x727f30): field picture + 2 of its row; empty if the lists
+// have none.
+std::string backgroundPicture(const std::vector<std::vector<std::string>>& rows, int32_t backgrounds, int32_t bg,
+                              int32_t picture) {
+    if (bg >= backgrounds) return {};
+    const int32_t row = backgroundRow(rows, bg);
+    const int32_t field = picture + 2;
+    if (row < 0 || field < 0 || static_cast<size_t>(field) >= rows[static_cast<size_t>(row)].size()) return {};
+    return rows[static_cast<size_t>(row)][static_cast<size_t>(field)];
+}
+
+// The comments of a list (0x723220): `//` to the end of its line, `/* */` across lines.
+void stripComments(std::vector<std::string>& lines) {
+    bool block = false;
+    for (std::string& line : lines) {
+        size_t start = 0;
+        for (size_t i = 0; i < line.size(); ++i) {
+            if (block) {
+                if (line.compare(i, 2, "*/") == 0) {
+                    line.erase(start, i + 2 - start);
+                    block = false;
+                    i = start;
+                    if (i >= line.size()) break;
+                    --i;
+                }
+            } else if (line[i] == '/' && i + 1 < line.size() && line[i + 1] == '*') {
+                block = true;
+                start = i;
+            } else if (line[i] == '/' && i + 1 < line.size() && line[i + 1] == '/') {
+                line.erase(i);
+                break;
+            }
+        }
+        if (block) {
+            line.erase(start);
+            start = 0;
+        }
+    }
+}
+
+// The comma-separated parts of two names merged (0x72a900 -> 0x72adf0): the second's part where it
+// has one other than "@", else the first's.
+std::string mergeName(const std::string& a, const std::string& b) {
+    const std::vector<std::string> pa = pieces(a, ','), pb = pieces(b, ',');
+    std::string out;
+    for (size_t i = 0; i < std::max(pa.size(), pb.size()); ++i) {
+        if (i) out += ',';
+        out += i < pa.size() && (i >= pb.size() || pb[i] == "@") ? pa[i] : pb[i];
+    }
+    return out;
+}
+
 // An object's opacity: a running mcfade sets it outright each frame (the engine's motion writes the
 // plane's alpha), else its own value.
 template <class O>
@@ -549,8 +701,12 @@ void FesInstance::applyRow(Object& o, const std::map<std::string, std::string>& 
                 }
             }
         }
+        else if (col == "TABLE") o.table = v;
         // TYPE: not needed for drawing yet.
     }
+    // A table object reads its lists when its row names them (0x701c80 / 0x701d80, the TABLE
+    // column's flag 0x8000000).
+    if (values.count("TABLE") && (o.type == "BGTABLE2" || o.type == "CHTABLE3")) loadTable(o);
 }
 
 FesInstance::Object* FesInstance::find(const std::string& name) {
@@ -1277,6 +1433,12 @@ bool FesInstance::execute(const FesScript::Statement& st) {
         globals_.set(num(t[1]), cgTable_ && host_ && host_->cgEntrySeen(str(t[2])) ? 1 : 0);
         return true;
     }
+    if (k == "debug") {
+        // `debug <n>` (0x71a000): the number written to the engine's debug log ("debug = %d").
+        const int32_t v = t.size() >= 2 ? num(t[1]) : 0;
+        if (log && t.size() >= 2 && std::getenv("NYAN_FES_TRACE")) log("fes " + name_ + ": debug = " + std::to_string(v));
+        return true;
+    }
     if (k == "getexvar" && t.size() >= 3) {
         auto v = host_ ? host_->exVar(t[1]) : std::nullopt;
         if (!v) unhandled("getexvar " + t[1]);
@@ -1611,6 +1773,7 @@ void FesInstance::method(Object& o, const std::string& m, const std::vector<std:
         primitive(o, sc->second.primitive, prim);
         return;
     }
+    if ((o.type == "BGTABLE2" || o.type == "CHTABLE3") && tableMethod(o, m, args)) return;
     if (m == "arc" || m == "mcarc") {
         // `arc <frames> <deg0> <deg1> <radiusX> <radiusY>`: move along a sine arc, holding the end.
         // Defaults 30 frames, the rest 0 (cs2.exe 0x623f40 / mcarc 0x6241d0, motArc).
@@ -2189,7 +2352,11 @@ void FesInstance::method(Object& o, const std::string& m, const std::vector<std:
         // transform, message 0x113 -> sprite +0x68): with n the sprite's rectangle follows its
         // rotation and scale about its base (0x601030), else it is the unturned one. The drawing
         // turns about the base either way; Nyanroid draws transformed quads, so nothing to do.
-    } else if (m == "lock" || m == "noact" || m == "keypos" || m == "tone") {
+    } else if (m == "tone") {
+        // `tone <r> <g> <b>` (Amakano 2's cs2.exe 0x70a040, Fruit's 0x5e8320): an image kind's
+        // colour scale in percent, 100 for each not given (0x6df270, applied by the sprite).
+        if (isImageKind(o.type)) o.tone = {arg(0, 100), arg(1, 100), arg(2, 100)};
+    } else if (m == "lock" || m == "noact" || m == "keypos") {
         // Input/animation details not modelled yet.
     } else {
         unhandled(o.type + "." + m);
@@ -2301,16 +2468,21 @@ FesInstance::Affine FesInstance::transform(const Object& o, uint64_t frame) cons
     // T(pos) * R * S * T(-base): x' = a x + c y, y' = b x + d y.
     float bx = static_cast<float>(o.baseX), by = static_cast<float>(o.baseY);
     float shiftX = 0, shiftY = 0;
-    if (o.btype == 1 && !o.file.empty()) {
-        if (const FrameInfo* f = frameInfo(str(o.file), o.frame())) bx = static_cast<float>(f->baseX), by = static_cast<float>(f->baseY);
-    } else if (!o.baseSet && !o.file.empty() && isImageKind(o.type)) {
+    // A stand's parts share one canvas; its first part (the body) gives the base.
+    const std::string file = o.type == "CHTABLE3" ? [&] {
+        const auto p = pictures(o);
+        return p.empty() ? std::string() : p.front();
+    }() : str(o.file);
+    if (o.btype == 1 && !file.empty()) {
+        if (const FrameInfo* f = frameInfo(file, o.frame())) bx = static_cast<float>(f->baseX), by = static_cast<float>(f->baseY);
+    } else if (!o.baseSet && !file.empty() && isImageKind(o.type)) {
         // BTYPE 0, the default: the image's load (cs2.exe 0x5625e0) makes the HG base less the
         // frame's offset its base and moves the offset into the object, so the picture stays where
         // its canvas puts it and turns and scales about its HG base point (the sprite's corners,
         // amakanoPE.exe 0x601030: position, rotation and scale about the base less the offset).
         // Amakano 1's title snowflakes (frames with their base at their centre, `mcrot`) spin in
         // place; Nyanroid turned them about the canvas corner, across the screen.
-        if (const FrameInfo* f = frameInfo(str(o.file), o.frame())) {
+        if (const FrameInfo* f = frameInfo(file, o.frame())) {
             bx = shiftX = static_cast<float>(f->baseX);
             by = shiftY = static_cast<float>(f->baseY);
         }
@@ -2671,7 +2843,7 @@ std::vector<FesQuad> FesInstance::draw(uint64_t frame) const {
             auto collect = [&](auto&& inPlane) {
                 for (const auto& o : objects_) {
                     if ((isDrawableType(o.type) || o.type == "SLIDER" || o.type == "SCROLL" || o.type == "SCROLL2" ||
-                         o.type == "SAVEPANEL" || o.type == "IMGWND") && o.disp &&
+                         o.type == "SAVEPANEL" || o.type == "IMGWND" || o.type == "BGTABLE2" || o.type == "CHTABLE3") && o.disp &&
                         !o.mask && !unmade(o) && inPlane(o)) {
                         items.push_back(&o);
                     }
@@ -2719,6 +2891,36 @@ std::vector<FesQuad> FesInstance::draw(uint64_t frame) const {
                       img->color, a);
                 continue;
             }
+            const std::array<int16_t, 3> tone{static_cast<int16_t>(std::clamp(img->tone[0], 0, 10000)),
+                                              static_cast<int16_t>(std::clamp(img->tone[1], 0, 10000)),
+                                              static_cast<int16_t>(std::clamp(img->tone[2], 0, 10000))};
+            if (img->type == "BGTABLE2" || img->type == "CHTABLE3") {
+                // A table's picture (a CHTABLE3's parts, each where the canvas puts it): its frame of
+                // the object's index, else its first.
+                const float alpha = calpha * std::clamp(opacity(*img, frame), 0, 255) / 255.0f;
+                if (alpha <= 0) continue;
+                const Affine t = world * transform(*img, frame);
+                for (const std::string& part : pictures(*img)) {
+                    int32_t id = img->frame();
+                    const FrameInfo* f = frameInfo(part, id);  // reads the picture's frames
+                    if (!f) {
+                        auto fit = frames_.find(part);
+                        if (fit == frames_.end() || fit->second.empty()) continue;
+                        id = fit->second.begin()->first;
+                        f = &fit->second.begin()->second;
+                    }
+                    FesQuad q;
+                    q.texture = part + "#" + std::to_string(id);
+                    q.alpha = alpha;
+                    q.tone = tone;
+                    const float xs[4] = {0, 1, 1, 0}, ys[4] = {0, 0, 1, 1};
+                    for (int k = 0; k < 4; ++k) {
+                        t.apply(static_cast<float>(f->x + xs[k] * f->w), static_cast<float>(f->y + ys[k] * f->h), q.x[k], q.y[k]);
+                    }
+                    out.push_back(std::move(q));
+                }
+                continue;
+            }
             std::string file = str(img->file);
             int32_t id = img->frame();
             if (img->anmPlaying && img->anmPlayer) {
@@ -2758,6 +2960,7 @@ std::vector<FesQuad> FesInstance::draw(uint64_t frame) const {
             FesQuad q;
             q.texture = file + "#" + std::to_string(id);
             q.alpha = alpha;
+            q.tone = tone;
             const float xs[4] = {0, 1, 1, 0}, ys[4] = {0, 0, 1, 1};
             for (int k = 0; k < 4; ++k) {
                 t.apply(static_cast<float>(f->x + xs[k] * f->w), static_cast<float>(f->y + ys[k] * f->h), q.x[k], q.y[k]);
@@ -3157,6 +3360,11 @@ std::string FesInstance::objectText(const std::string& object) const {
     return isValidUtf8(t) ? t : sjisToUtf8(t);
 }
 
+std::string FesInstance::objectFile(const std::string& object) const {
+    auto it = byName_.find(object);
+    return it == byName_.end() ? std::string() : str(objects_[it->second].file);
+}
+
 int FesInstance::objectAlign(const std::string& object) const {
     auto it = byName_.find(object);
     return it == byName_.end() ? 0 : objects_[it->second].textAlign;
@@ -3408,6 +3616,186 @@ std::optional<Bytes> FesInstance::readFile(const std::string& path) const {
     auto ref = assets_.find(path);
     if (!ref) return std::nullopt;
     return ref->archive->read(*ref->entry);
+}
+
+void FesInstance::loadTable(Object& o) {
+    TableData& t = tables_[o.name];
+    t.rows.clear();
+    t.backgrounds = 0;
+    t.sections.clear();
+    const std::optional<Bytes> data = readFile(str(o.table));
+    if (!data) {
+        unhandled("missing table " + str(o.table));
+        return;
+    }
+    const std::string text = decodeGameText(std::string_view(reinterpret_cast<const char*>(data->data()), data->size()));
+    if (o.type == "BGTABLE2") {
+        // kcFEScriptObjBgTable2's list (0x6fc4e0 -> 0x727d90): the CSV, and how many rows are
+        // backgrounds (first field "○").
+        t.rows = parseCsv(text);
+        for (const auto& row : t.rows) t.backgrounds += !row.empty() && row[0] == kBackgroundMark;
+        return;
+    }
+    // kcFEScriptObjChTable3's list (0x6fcdf0 -> 0x729c50): a line starting with '#' names the
+    // section the following lines make (the rest of the line, as written); each other line's first
+    // two space-separated words are an entry's name part and the section its choice leads to (none
+    // after one word). A section is kept once it has an entry, the first of a name only.
+    std::string section;
+    std::vector<std::pair<std::string, std::string>> entries;
+    for (const std::string& line : textLines(text)) {
+        if (!line.empty() && line[0] == '#') {
+            if (!entries.empty()) t.sections.emplace(section, std::move(entries));
+            entries.clear();
+            section = line.substr(1);
+            continue;
+        }
+        const std::vector<std::string> words = pieces(line, ' ');
+        if (!words.empty()) entries.emplace_back(words[0], words.size() > 1 ? words[1] : std::string());
+    }
+    if (!entries.empty()) t.sections.emplace(section, std::move(entries));
+}
+
+bool FesInstance::tableMethod(Object& o, const std::string& m, const std::vector<std::string>& args) {
+    auto arg = [&](size_t i, int32_t def = 0) { return i < args.size() ? num(args[i], def) : def; };
+    const bool bg = o.type == "BGTABLE2";
+    TableData& t = tables_[o.name];
+    // The choices from a CHTABLE3's command (up to 16, as the handlers read them).
+    auto choices = [&](size_t from) {
+        std::vector<int32_t> v;
+        for (size_t i = from; i < args.size() && v.size() < 16; ++i) v.push_back(num(args[i]));
+        return v;
+    };
+    auto section = [&](const std::string& name) {
+        auto it = t.sections.find(name);
+        return it == t.sections.end() ? nullptr : &it->second;
+    };
+    if (m == "max") {
+        // `max <var> [<choice>...]` (Amakano 2's cs2.exe 0x708c70): a BGTABLE2's backgrounds
+        // (0x727ea0); a CHTABLE3's entries in the section the choices lead to from _TOP_, 0 if
+        // one is out of range or leads nowhere (0x72a590).
+        int32_t n = t.backgrounds;
+        if (!bg) {
+            n = 0;
+            auto* s = section("_TOP_");
+            for (int32_t c : choices(1)) {
+                if (!s) break;
+                if (static_cast<uint32_t>(c) >= s->size()) {
+                    s = nullptr;
+                    break;
+                }
+                s = section((*s)[static_cast<size_t>(c)].second);
+            }
+            if (s) n = static_cast<int32_t>(s->size());
+        }
+        globals_.set(arg(0), n);
+        return true;
+    }
+    if (bg && m == "exist") {
+        // `exist <background> <picture> <var>` (0x708ab0 -> 0x727eb0): 1 if the background has
+        // that picture.
+        globals_.set(arg(2), backgroundPicture(t.rows, t.backgrounds, arg(0), arg(1)).empty() ? 0 : 1);
+        return true;
+    }
+    if (m == "load") {
+        // BGTABLE2 `load <background> <picture>` (0x705650 -> 0x6fc540 -> 0x727f30): that
+        // picture; a background or picture the list lacks leaves the image as it is.
+        if (bg) {
+            std::string name = backgroundPicture(t.rows, t.backgrounds, arg(0), arg(1));
+            if (!name.empty()) o.file = name;
+            return true;
+        }
+        // CHTABLE3 `load <choice>...` (0x6fce60 -> 0x72a230): from _TOP_, each choice's entry adds
+        // its name part (mergeName) and leads to the next section, until the choices run out, one
+        // is out of range or a section is missing. `baseopt` goes before the name's first comma
+        // (when one is past the start), and every "@" left becomes "0": "Base,a,0,b", a stand's
+        // parts as the image loader takes them. Without _TOP_ the image stays.
+        auto* s = section("_TOP_");
+        if (!s) return true;
+        std::string name;
+        for (int32_t c : choices(0)) {
+            if (!s || static_cast<uint32_t>(c) >= s->size()) break;
+            const auto& entry = (*s)[static_cast<size_t>(c)];
+            name = mergeName(name, entry.first);
+            s = section(entry.second);
+        }
+        if (const size_t comma = name.find(','); comma != std::string::npos && comma != 0) name.insert(comma, t.prefix);
+        std::replace(name.begin(), name.end(), '@', '0');
+        o.file = name;
+        return true;
+    }
+    if (bg && m == "tonetbl") {
+        // `tonetbl <file>` (0x70a1e0 -> 0x6fc5f0 -> 0x728fb0): the old table goes; the file's
+        // comments go (0x723220), then every space and tab, then the empty lines. A line with
+        // `#name(r,g,b)` starts a tone (name from the '#'; a part left out keeps the last tone's
+        // value; before any, __UNKNOWN__ at 100 100 100); any other line is a picture of the tone
+        // above it. The first of a name counts; names in lower case.
+        if (args.empty()) return true;
+        t.toneTable = false;
+        t.toneOf.clear();
+        t.tones.clear();
+        const std::optional<Bytes> data = readFile(str(args[0]));
+        if (!data) return true;
+        t.toneTable = true;
+        std::vector<std::string> lines =
+            textLines(decodeGameText(std::string_view(reinterpret_cast<const char*>(data->data()), data->size())));
+        stripComments(lines);
+        std::string tone = "__UNKNOWN__";
+        std::array<int32_t, 3> rgb{100, 100, 100};
+        for (std::string line : lines) {
+            std::erase_if(line, [](char c) { return c == ' ' || c == '\t'; });
+            if (line.empty()) continue;
+            // 0x728df0: a line is a tone once it has '#' and then '('.
+            const size_t hash = line.find('#');
+            const size_t open = hash == std::string::npos ? std::string::npos : line.find('(', hash);
+            if (open != std::string::npos) {
+                tone = line.substr(hash, open - hash);
+                size_t at = open + 1;
+                for (int k = 0; k < 3; ++k) {
+                    const size_t end = line.find(k < 2 ? ',' : ')', at);
+                    if (end == std::string::npos) break;
+                    rgb[static_cast<size_t>(k)] = std::atoi(line.substr(at, end - at).c_str());
+                    at = end + 1;
+                }
+                continue;
+            }
+            // 0x7285f0: the tone's values and the picture's tone, each unless already there.
+            t.tones.emplace(toLowerAscii(tone), rgb);
+            t.toneOf.emplace(toLowerAscii(line), toLowerAscii(tone));
+        }
+        return true;
+    }
+    if (bg && m == "gettonetbl") {
+        // `gettonetbl <r var> <g var> <b var>` (0x70a2c0 -> 0x6fc720 -> 0x728a70): the tone of the
+        // picture shown, 100 100 100 without a table or a tone for it; each variable given is set.
+        std::array<int32_t, 3> rgb{100, 100, 100};
+        if (t.toneTable) {
+            if (auto it = t.toneOf.find(toLowerAscii(o.file)); it != t.toneOf.end()) {
+                if (auto tt = t.tones.find(it->second); tt != t.tones.end()) rgb = tt->second;
+            }
+        }
+        for (size_t k = 0; k < 3; ++k) {
+            const int32_t var = arg(k, -1);
+            if (var != -1) globals_.set(var, rgb[k]);
+        }
+        return true;
+    }
+    if (!bg && m == "baseopt") {
+        // `baseopt <text>` (0x70f5b0 -> 0x6fcf80 -> 0x72a750): what `load` puts before the name's
+        // first comma.
+        t.prefix = args.empty() ? std::string() : str(args[0]);
+        return true;
+    }
+    return false;
+}
+
+std::vector<std::string> FesInstance::pictures(const Object& o) const {
+    const std::string file = str(o.file);
+    if (o.type != "CHTABLE3") return {file};
+    // A CHTABLE3's name is a stand's parts on one canvas (Base,a,b,...), loaded as the scene's
+    // stand images are.
+    auto it = parts_.find(file);
+    if (it == parts_.end()) it = parts_.emplace(file, ScenePlayer::spriteParts(assets_, file)).first;
+    return it->second;
 }
 
 int32_t FesInstance::cgTableGroup(const std::string& tok) {

@@ -1561,6 +1561,106 @@ void testLooseFolders() {
     fs::remove_all(dir);
 }
 
+// The stand viewers' table objects as Amakano 2's cs2.exe has them: a BGTABLE2's CSV (0x727d90:
+// backgrounds are the rows marked "○", pictures their fields from the third), its tone table
+// (0x728fb0: comments, spaces and empty lines dropped, `#name(r,g,b)` then its pictures, the first
+// of a name counting) and a CHTABLE3's sections (0x729c50), whose choices build a name part by part
+// (0x72a230). The lists here are made up.
+void testFesTables() {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / ("nyan-tables-" + std::to_string(::getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    auto kif = [](const std::vector<std::pair<std::string, std::string>>& files) {
+        std::string out = std::string("KIF\0", 4);
+        auto u32 = [&](uint32_t v) { for (int i = 0; i < 4; ++i) out.push_back(static_cast<char>(v >> (8 * i))); };
+        u32(static_cast<uint32_t>(files.size()));
+        uint32_t offset = 8 + 72 * static_cast<uint32_t>(files.size());
+        for (const auto& [name, data] : files) {
+            std::string n = name;
+            n.resize(64, '\0');
+            out += n;
+            u32(offset);
+            u32(static_cast<uint32_t>(data.size()));
+            offset += static_cast<uint32_t>(data.size());
+        }
+        for (const auto& f : files) out += f.second;
+        return out;
+    };
+    const std::string mark = "\x81\x9b";  // "○" in Shift-JIS
+    const std::string csv = mark + ",bgA,bgA1,bgA2\r\nx,skip,no\r\n" + mark + ",bgB,\"bgB,1\",,bgB3,\r\n\r\n" + mark +
+                            ",bgC\r\n";
+    const std::string tone = "/* a\r\n comment */#t1 ( 100, 90 ,80 ) // day\r\nbgA1\r\n\r\n#t2(50,60,70)\r\nBGB3\r\nbga1\r\n";
+    const std::string cl = "#_TOP_\r\n@ p1\r\n@ p2\r\n#p1\r\nbase1 w1\r\nbase2  w1 \r\n#w1\r\n@,a f1\r\n@,b\r\n"
+                           "#f1\r\n@,@,@\r\n@,@,c x\r\n#p2\r\nother\r\n";
+    std::ofstream(dir / "config.int", std::ios::binary)
+        << kif({{"bg.csv", csv}, {"tone.tbl", tone}, {"ch.cl", cl}});
+    {
+        nyan::DirectoryGameFolder folder(dir.string());
+        const auto assets = nyan::cs2::AssetIndex::load(folder);
+        nyan::cs2::VarStore vars;
+        auto script = nyan::cs2::FesScript::parse(
+            "#DEFINE\n"
+            "BGTABLE2 bg\n"
+            "CHTABLE3 ch\n"
+            "#OBJECT POS PRI BTYPE TABLE\n"
+            "bg 0,0 1 0 config.int/bg.csv\n"
+            "ch 0,0 2 1 config.int/ch.cl\n"
+            "#START\n"
+            "bg max 1\n"
+            "bg exist 1 0 2\n"
+            "bg exist 1 1 3\n"
+            "bg exist 1 2 4\n"
+            "bg exist 1 3 5\n"
+            "bg exist 3 0 6\n"
+            "bg gettonetbl 7 8 9\n"
+            "bg tonetbl config.int/tone.tbl\n"
+            "bg load 0 0\n"
+            "bg gettonetbl 10 11 12\n"
+            "bg load 1 2\n"
+            "bg gettonetbl 13 14 15\n"
+            "bg load 2 0\n"
+            "ch max 20\n"
+            "ch max 21 0\n"
+            "ch max 22 0 1\n"
+            "ch max 23 0 0 1\n"
+            "ch max 24 5\n"
+            "ch max 25 1\n"
+            "ch load 0 0 0 0\n"
+            "wait 1\n"
+            "ch baseopt L\n"
+            "ch load 0 1 0 1\n"
+            "wait 1\n"
+            "#END\n");
+        auto fes = nyan::cs2::FesInstance::create(assets, vars, "t", std::move(script), 0);
+        fes->tick(1);
+        CHECK_EQ(vars.get(1), 3);
+        CHECK_EQ(vars.get(2), 1);  // "bgB,1": quoted, its comma kept
+        CHECK_EQ(vars.get(3), 0);  // an empty field
+        CHECK_EQ(vars.get(4), 1);
+        CHECK_EQ(vars.get(5), 0);  // past the row's last field (a trailing comma adds none)
+        CHECK_EQ(vars.get(6), 0);  // only three backgrounds
+        CHECK_EQ(vars.get(7), 100);  // no tone table yet
+        CHECK_EQ(vars.get(10), 100);
+        CHECK_EQ(vars.get(11), 90);
+        CHECK_EQ(vars.get(12), 80);
+        CHECK_EQ(vars.get(13), 50);
+        CHECK_EQ(vars.get(14), 60);
+        CHECK_EQ(vars.get(15), 70);
+        CHECK_EQ(fes->objectFile("bg"), std::string("bgB3"));  // bgC has no pictures: kept
+        CHECK_EQ(vars.get(20), 2);
+        CHECK_EQ(vars.get(21), 2);
+        CHECK_EQ(vars.get(22), 2);
+        CHECK_EQ(vars.get(23), 0);  // "@,b" leads nowhere
+        CHECK_EQ(vars.get(24), 0);  // out of range
+        CHECK_EQ(vars.get(25), 1);
+        CHECK_EQ(fes->objectFile("ch"), std::string("base1,a,0"));
+        fes->tick(2);
+        CHECK_EQ(fes->objectFile("ch"), std::string("base2L,a,c"));
+    }
+    fs::remove_all(dir);
+}
+
 void testSjis() {
     CHECK_EQ(nyan::sjisToUtf8("abc\\x"), std::string("abc\\x"));
     // "あ" (0x82A0) and half-width katakana "ｱ" (0xB1).
@@ -2056,6 +2156,7 @@ int main() {
     testKifNameCipher();
     testKifSeedSearch();
     testLooseFolders();
+    testFesTables();
     testSjis();
     testEngineDetection();
     if (failures) {

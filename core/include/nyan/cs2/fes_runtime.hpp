@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <functional>
 #include <limits>
 #include <map>
@@ -56,6 +57,8 @@ struct FesQuad {
     float revealFramesPerGlyph = 0;
     // The part of the texture drawn (0..1; IMGWND's tiles cut at the window's far edges).
     float u0 = 0, v0 = 0, u1 = 1, v1 = 1;
+    // The image's `tone`: each colour channel scaled by this percentage (min(255, c * pct / 100)).
+    std::array<int16_t, 3> tone{100, 100, 100};
     // Drawn only inside this screen rectangle (virtual pixels): its container's VIEWPORT.
     bool clip = false;
     float clipX = 0, clipY = 0, clipW = 0, clipH = 0;
@@ -153,6 +156,13 @@ public:
         int32_t uid = 0;   // value of the object's name in expressions (`_CLICK_L_==bg`)
 
         std::string file;              // image file (FILE), resolved from $strN
+        // BGTABLE2 / CHTABLE3 (the stand viewers): the TABLE column's list file, read when the row
+        // gives it (Amakano 2's cs2.exe 0x701c80 / 0x701d80); their `load` makes `file` from it.
+        std::string table;
+        // `tone <r> <g> <b>` (0x70a040 -> 0x6df270; the image kinds, Fruit's 0x5e8320 too): each
+        // colour channel of the picture scaled by that percentage, 100 when not given (the
+        // sprite's table, 0x620cc0: min(255, c * pct / 100)).
+        std::array<int32_t, 3> tone{100, 100, 100};
         std::map<int, int32_t> ids;    // ID.n / settbl n -> frame id (the table; unset entries are n)
         bool idTable = false;          // an ID.n column or settbl has written the table
         int32_t idIndex = 0;           // `setid`
@@ -388,6 +398,8 @@ public:
     std::vector<std::string> objectNames() const;
     // A STRING object's text in UTF-8 (empty if none), and clearing it as `<object> clear` does.
     std::string objectText(const std::string& object) const;
+    // An image object's picture name (its FILE, or what `load` made of a table's lists).
+    std::string objectFile(const std::string& object) const;
     // A STRING's alignment from its text's print prefix: 0 left, 1 right (`\pr`), 2 centred (`\pc`).
     int objectAlign(const std::string& object) const;
     void clearText(const std::string& object);
@@ -602,6 +614,29 @@ private:
     bool fileExists(const std::string& path) const;
     // `archive.int/entry` as fileExists finds it (an update archive's copy first), else an asset.
     std::optional<Bytes> readFile(const std::string& path) const;
+    // A BGTABLE2's or CHTABLE3's lists (Amakano 2's cs2.exe kcFEScriptObjBgTable2 /
+    // kcFEScriptObjChTable3 and the list objects they hold), by object name.
+    struct TableData {
+        // BGTABLE2 (0x727d90): the CSV's rows (0x6c02b0, commas and quotes); a background is a row
+        // whose first field is "○", its pictures the fields from the third on.
+        std::vector<std::vector<std::string>> rows;
+        int32_t backgrounds = 0;
+        // Its `tonetbl` (0x728fb0): each picture's tone and each tone's percentages, by lower-case
+        // name; none until one is read.
+        bool toneTable = false;
+        std::map<std::string, std::string> toneOf;
+        std::map<std::string, std::array<int32_t, 3>> tones;
+        // CHTABLE3 (0x729c50): the `#name` sections, each a list of (name part, next section).
+        std::map<std::string, std::vector<std::pair<std::string, std::string>>> sections;
+        std::string prefix;  // `baseopt` (0x72a750): put before the name's first comma
+    };
+    std::map<std::string, TableData> tables_;
+    void loadTable(Object& o);
+    // A table object's own commands; false for the ones every image kind takes.
+    bool tableMethod(Object& o, const std::string& m, const std::vector<std::string>& args);
+    // The pictures an image object shows: a CHTABLE3's name may stand for several (its parts).
+    std::vector<std::string> pictures(const Object& o) const;
+    mutable std::unordered_map<std::string, std::vector<std::string>> parts_;  // by CHTABLE3 name
     // `cgreg_init`'s table (the FE task's +0x6cc, amakanoPE.exe 0x62c8b0): the groups of the list
     // it named (empty if that list is missing). None before cgreg_init: the gallery commands
     // answer 0. The records are the engine's (Host::cgEntrySeen).
