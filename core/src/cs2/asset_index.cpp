@@ -2,7 +2,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <set>
 
+#include "nyan/common/sjis.hpp"
+#include "nyan/common/xml.hpp"
 #include "nyan/cs2/kif_seed_search.hpp"
 #include "nyan/cs2/psb.hpp"
 
@@ -85,6 +88,29 @@ std::optional<uint32_t> namesSeed(const GameFolder& folder, const std::vector<st
     return seed;
 }
 
+// A file type startup.xml lists (INT/intNN: int, ext, dir): its archive, extension and folder.
+struct FileType {
+    std::string ext, dir;
+};
+
+std::vector<FileType> fileTypes(const GameFolder& folder, const AssetIndex& index) {
+    Bytes xml;
+    if (auto f = folder.open("config/startup.xml")) xml = f->readAll();
+    else if (index.find("startup.xml")) xml = index.read("startup.xml");
+    std::vector<FileType> types;
+    if (xml.empty()) return types;
+    auto root = parseXml(decodeGameText(std::string_view(reinterpret_cast<const char*>(xml.data()), xml.size())));
+    const XmlNode* table = root ? root->find("document/INT") : nullptr;
+    if (!table) return types;
+    for (const auto& t : table->children) {
+        if (!t->name.starts_with("int")) continue;
+        FileType type{t->value("ext").value_or(""), t->value("dir").value_or("")};
+        std::replace(type.dir.begin(), type.dir.end(), '\\', '/');
+        if (!type.ext.empty() && !type.dir.empty()) types.push_back(std::move(type));
+    }
+    return types;
+}
+
 }  // namespace
 
 bool AssetIndex::needsSeedSearch(const GameFolder& folder) {
@@ -112,12 +138,43 @@ AssetIndex AssetIndex::load(const GameFolder& folder) {
         }
     }
     if (index.archives_.empty()) fail("No KIF (.int) archives found in " + folder.displayName());
+    index.addLooseFolders(folder);
     // E-mote games ship the SDK's driver; its key opens their models' headers.
     for (const auto& name : folder.list()) {
         if (toLowerAscii(name) != "emotedriver.dll") continue;
         if (auto f = folder.open(name)) index.emoteKeys_ = Psb::keyCandidates(f->readAll());
     }
     return index;
+}
+
+void AssetIndex::addLooseFolders(const GameFolder& folder) {
+    // The engine registers each file type of startup.xml with its archive and its folder (cs2.exe
+    // 0x48d0f0 -> 0x565680, Amakano 2) and the update??.INT patches in a list of their own
+    // (0x565c00). Its open (0x566490) looks in the patches first (0x566da0), then, in mode 3 (the
+    // mode its opens pass), in each type's folder ("<dir>\\<name>") before its archive. So a
+    // loose file overrides the base archives but not the patches (Ikinari Anata ni Koishiteiru's
+    // English name plates are loose; its English scenes are in the patches, older copies loose);
+    // between two folders of one extension the earlier type's wins.
+    std::vector<std::string> seen;
+    std::set<std::string> loose;  // names a folder gave
+    for (const FileType& t : fileTypes(folder, *this)) {
+        const std::string dir = toLowerAscii(t.dir), ext = toLowerAscii(t.ext);
+        if (std::find(seen.begin(), seen.end(), dir + "|" + ext) != seen.end()) continue;
+        seen.push_back(dir + "|" + ext);
+        std::vector<std::string> files;
+        for (const auto& f : folder.listDir(t.dir)) {
+            const size_t dot = f.rfind('.');
+            if (dot != std::string::npos && toLowerAscii(f.substr(dot + 1)) == ext) files.push_back(f);
+        }
+        if (files.empty()) continue;
+        archives_.push_back(KifArchive::openFolder(folder, t.dir, files));
+        const KifArchive* archive = archives_.back().get();
+        for (const auto& entry : archive->entries()) {
+            std::string key = normalizeName(entry.name);
+            if (auto it = lookup_.find(key); it != lookup_.end() && isUpdateArchive(toLowerAscii(it->second.archive->name()))) continue;
+            if (loose.insert(key).second) lookup_.insert_or_assign(std::move(key), AssetRef{archive, &entry});
+        }
+    }
 }
 
 uint32_t AssetIndex::emoteKey(ByteSpan model) const {

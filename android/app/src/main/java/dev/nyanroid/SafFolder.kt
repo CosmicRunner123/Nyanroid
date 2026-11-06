@@ -39,11 +39,17 @@ class SafFolder(private val resolver: ContentResolver, val treeUri: Uri) {
     /** Names of regular files directly in the folder. Called from native code. */
     fun list(): Array<String> = children(rootDocId).filter { !it.isDir }.map { it.name }.toTypedArray()
 
-    /** Names of regular files in subfolder `sub` (case-insensitive). Called from native code. */
+    /** Names of regular files in subfolder `sub` (case-insensitive; may contain '/' separators).
+     *  Called from native code. */
     fun listDir(sub: String): Array<String> {
-        val dir = children(rootDocId).firstOrNull { it.isDir && it.name.equals(sub, ignoreCase = true) }
-            ?: return emptyArray()
-        return children(dir.docId).filter { !it.isDir }.map { it.name }.toTypedArray()
+        var docId = rootDocId
+        val parts = sub.split('/', '\\').filter { it.isNotEmpty() }
+        if (parts.isEmpty()) return emptyArray()
+        for (part in parts) {
+            docId = children(docId).firstOrNull { it.isDir && it.name.equals(part, ignoreCase = true) }?.docId
+                ?: return emptyArray()
+        }
+        return children(docId).filter { !it.isDir }.map { it.name }.toTypedArray()
     }
 
     /** Display name of the picked folder. */

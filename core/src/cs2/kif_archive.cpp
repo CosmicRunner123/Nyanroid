@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "nyan/common/error.hpp"
+#include "nyan/common/sjis.hpp"
 #include "nyan/cs2/mersenne_twister.hpp"
 
 namespace nyan::cs2 {
@@ -114,7 +115,32 @@ std::unique_ptr<KifArchive> KifArchive::open(std::unique_ptr<RandomAccessFile> f
     return archive;
 }
 
+std::unique_ptr<KifArchive> KifArchive::openFolder(const GameFolder& folder, std::string dir,
+                                                   const std::vector<std::string>& files) {
+    auto archive = std::unique_ptr<KifArchive>(new KifArchive());
+    archive->name_ = dir + "/";
+    archive->folder_ = &folder;
+    for (const auto& f : files) {
+        // Scripts name files in Shift-JIS, as the archives store them; listings are UTF-8.
+        std::string sjis = utf8ToSjis(f);
+        archive->entries_.push_back({sjisToUtf8(sjis) == f ? sjis : f, 0, 0});
+        archive->paths_.push_back(dir + "/" + f);
+    }
+    return archive;
+}
+
+std::string KifArchive::loosePath(const KifEntry& entry) const {
+    const size_t i = static_cast<size_t>(&entry - entries_.data());
+    if (i >= paths_.size()) throw Error("Not an entry of " + name_);
+    return paths_[i];
+}
+
 Bytes KifArchive::read(const KifEntry& entry) const {
+    if (folder_) {
+        auto file = folder_->open(loosePath(entry));
+        if (!file) throw Error("Cannot open " + loosePath(entry));
+        return file->readAll();
+    }
     Bytes data = file_->readAt(entry.offset, entry.length);
     if (blowfish_) blowfish_->decrypt(data.data(), data.size());
     return data;
@@ -155,6 +181,7 @@ private:
 }  // namespace
 
 std::shared_ptr<RandomAccessFile> KifArchive::openEntry(const KifEntry& entry) const {
+    if (folder_) return std::shared_ptr<RandomAccessFile>(folder_->open(loosePath(entry)));
     return std::make_shared<EntryFile>(*file_, blowfish_ ? &*blowfish_ : nullptr, entry);
 }
 

@@ -75,13 +75,28 @@ std::vector<std::string> DirectoryGameFolder::list() const {
 }
 
 std::vector<std::string> DirectoryGameFolder::listDir(const std::string& sub) const {
+    // Each part of the path ("sound/bgm") matched case-insensitively.
     std::vector<std::string> names;
     std::error_code ec;
-    for (const auto& dir : std::filesystem::directory_iterator(path_, ec)) {
-        if (!dir.is_directory() || toLowerAscii(dir.path().filename().string()) != toLowerAscii(sub)) continue;
-        for (const auto& entry : std::filesystem::directory_iterator(dir.path(), ec)) {
-            if (entry.is_regular_file()) names.push_back(entry.path().filename().string());
+    std::filesystem::path current(path_);
+    for (size_t start = 0; start <= sub.size();) {
+        size_t slash = sub.find_first_of("/\\", start);
+        std::string part = sub.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
+        start = slash == std::string::npos ? sub.size() + 1 : slash + 1;
+        if (part.empty()) continue;
+        std::filesystem::path match;
+        for (const auto& dir : std::filesystem::directory_iterator(current, ec)) {
+            if (dir.is_directory() && toLowerAscii(dir.path().filename().string()) == toLowerAscii(part)) {
+                match = dir.path();
+                break;
+            }
         }
+        if (match.empty()) return names;
+        current = match;
+    }
+    if (current == std::filesystem::path(path_)) return names;
+    for (const auto& entry : std::filesystem::directory_iterator(current, ec)) {
+        if (entry.is_regular_file()) names.push_back(entry.path().filename().string());
     }
     std::sort(names.begin(), names.end());
     return names;

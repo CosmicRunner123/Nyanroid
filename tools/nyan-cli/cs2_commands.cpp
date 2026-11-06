@@ -221,7 +221,8 @@ void printPsb(const cs2::PsbValue& v, int depth, int indent) {
 }
 
 int cmdPsb(const std::string& dir, const std::string& name, const std::string& path, int depth) {
-    AssetIndex index = AssetIndex::load(DirectoryGameFolder(dir));
+    DirectoryGameFolder folder(dir);
+    AssetIndex index = AssetIndex::load(folder);
     Bytes file = index.read(name);
     std::ifstream lib(fs::path(dir) / "emotedriver.dll", std::ios::binary);
     Bytes dll((std::istreambuf_iterator<char>(lib)), {});
@@ -256,7 +257,8 @@ int cmdPsb(const std::string& dir, const std::string& name, const std::string& p
 // evaluation without the renderer): `emote <game-dir> <name.psz> <out.png> [var=value ...]`.
 int cmdEmote(const std::string& dir, const std::string& name, const std::string& outPath,
              const std::vector<std::string>& assigns) {
-    AssetIndex index = AssetIndex::load(DirectoryGameFolder(dir));
+    DirectoryGameFolder folder(dir);
+    AssetIndex index = AssetIndex::load(folder);
     Bytes file = index.read(name);
     std::ifstream lib(fs::path(dir) / "emotedriver.dll", std::ios::binary);
     Bytes dll((std::istreambuf_iterator<char>(lib)), {});

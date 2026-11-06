@@ -20,7 +20,8 @@ struct AssetRef {
 
 // All KIF archives of one CatSystem2 game, merged into a single case-insensitive
 // name lookup. Archives named updateNN.int are patches: they are applied last,
-// in ascending order, and override same-named entries in the base archives.
+// in ascending order, and override same-named entries in the base archives. Files in the
+// folders startup.xml names per file type (image/, scene/, ...) override both.
 class AssetIndex {
 public:
     static AssetIndex load(const GameFolder& folder);
@@ -54,6 +55,7 @@ public:
     static std::string normalizeName(std::string_view sjis);
 
 private:
+    void addLooseFolders(const GameFolder& folder);
     std::optional<VCodes> vcodes_;
     std::optional<uint32_t> tocSeed_;
     bool tocSeedSearched_ = false;

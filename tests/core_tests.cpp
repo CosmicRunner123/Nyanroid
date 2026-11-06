@@ -3,11 +3,14 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include <zlib.h>
+#include <unistd.h>
 
 #include "nyan/common/engine.hpp"
 #include "nyan/common/sjis.hpp"
@@ -1480,6 +1483,57 @@ void testKifSeedSearch() {
     CHECK_EQ(nyan::cs2::kifSeedCached(raw), true);
 }
 
+// Files in a type's folder (startup.xml INT/intNN/dir) override its archive but not the update
+// patches (cs2.exe 0x566490: the patches first, then the folder, then the archive).
+void testLooseFolders() {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / ("nyan-loose-" + std::to_string(::getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir / "config");
+    fs::create_directories(dir / "image");
+    auto write = [](const fs::path& path, const std::string& data) {
+        std::ofstream(path, std::ios::binary).write(data.data(), static_cast<std::streamsize>(data.size()));
+    };
+    // A plain KIF: "KIF\0", the count, 72-byte entries (name, offset, length), the data.
+    auto kif = [](const std::vector<std::pair<std::string, std::string>>& files) {
+        std::string out = std::string("KIF\0", 4);
+        auto u32 = [&](uint32_t v) { for (int i = 0; i < 4; ++i) out.push_back(static_cast<char>(v >> (8 * i))); };
+        u32(static_cast<uint32_t>(files.size()));
+        uint32_t offset = 8 + 72 * static_cast<uint32_t>(files.size());
+        for (const auto& [name, data] : files) {
+            std::string n = name;
+            n.resize(64, '\0');
+            out += n;
+            u32(offset);
+            u32(static_cast<uint32_t>(data.size()));
+            offset += static_cast<uint32_t>(data.size());
+        }
+        for (const auto& f : files) out += f.second;
+        return out;
+    };
+    write(dir / "image.int", kif({{"a.hg3", "BASE-A"}, {"b.hg3", "BASE-B"}, {"c.hg3", "BASE-C"}}));
+    write(dir / "update00.int", kif({{"b.hg3", "PATCH-B"}}));
+    write(dir / "config" / "startup.xml",
+          "<?xml version=\"1.0\" encoding=\"Shift_JIS\"?><document><INT><int00><name>image</name>"
+          "<int>image.int</int><ext>hg3</ext><dir>image</dir></int00></INT></document>");
+    write(dir / "image" / "a.hg3", "LOOSE-A");
+    write(dir / "image" / "b.hg3", "LOOSE-B");
+    write(dir / "image" / "notes.txt", "not an hg3");
+    {
+        nyan::DirectoryGameFolder folder(dir.string());
+        const auto index = nyan::cs2::AssetIndex::load(folder);
+        auto text = [&](const char* name) {
+            nyan::Bytes b = index.read(name);
+            return std::string(b.begin(), b.end());
+        };
+        CHECK_EQ(text("a.hg3"), std::string("LOOSE-A"));
+        CHECK_EQ(text("b.hg3"), std::string("PATCH-B"));
+        CHECK_EQ(text("c.hg3"), std::string("BASE-C"));
+        CHECK_EQ(index.find("notes.txt").has_value(), false);
+    }
+    fs::remove_all(dir);
+}
+
 void testSjis() {
     CHECK_EQ(nyan::sjisToUtf8("abc\\x"), std::string("abc\\x"));
     // "あ" (0x82A0) and half-width katakana "ｱ" (0xB1).
@@ -1973,6 +2027,7 @@ int main() {
     testBlowfish();
     testKifNameCipher();
     testKifSeedSearch();
+    testLooseFolders();
     testSjis();
     testEngineDetection();
     if (failures) {

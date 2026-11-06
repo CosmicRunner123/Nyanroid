@@ -23,6 +23,13 @@ public:
     static std::unique_ptr<KifArchive> open(std::unique_ptr<RandomAccessFile> file, std::string archiveName,
                                             std::optional<uint32_t> tocSeed);
 
+    // A game folder's subfolder taken as an archive of the files given (names as listed), each
+    // read whole when asked for: the engine opens a file type's file from its folder before its
+    // archive (AssetIndex::load). `folder` must outlive the archive.
+    static std::unique_ptr<KifArchive> openFolder(const GameFolder& folder, std::string dir,
+                                                  const std::vector<std::string>& files);
+    bool loose() const { return folder_ != nullptr; }
+
     // The entry names as the table stores them (obfuscated when the archive is encrypted: name i
     // is unobfuscated with the names' seed + i), and whether the archive is encrypted.
     static std::vector<std::string> rawNames(const RandomAccessFile& file, bool& encrypted);
@@ -44,6 +51,9 @@ private:
     std::unique_ptr<RandomAccessFile> file_;
     std::vector<KifEntry> entries_;
     std::optional<Blowfish> blowfish_;
+    const GameFolder* folder_ = nullptr;  // a loose folder: entry i is the file paths_[i]
+    std::vector<std::string> paths_;
+    std::string loosePath(const KifEntry& entry) const;
 };
 
 // Unobfuscates a KIF entry name in place (Beaufort-style letter substitution).
