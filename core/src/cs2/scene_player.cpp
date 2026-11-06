@@ -1636,7 +1636,7 @@ void ScenePlayer::command(const std::string& text) {
         if (args.size() > 2) plane = argNum(args, 2, plane);
         return;
     }
-    if (effectCut_ && (cmd == "draw" || cmd == "rdraw" || cmd == "rpflip" || cmd == "wbreak" || cmd == "rwmos" ||
+    if (effectCut_ && (cmd == "draw" || cmd == "rdraw" || cmd == "rpflip" || cmd == "rcflip" || cmd == "wbreak" || cmd == "rwmos" ||
                        cmd == "rfmos" || cmd == "wipe" || cmd == "rwipe" || cmd == "wipe2" || cmd == "wipe3")) {
         // The config's `effcut` (offset 0x13494 in Cyanotype's cs2.exe, getconf 0x68ca5e; main.kcs's
         // native 359 lays the block from 0x13490 at m[0x8000172c], +4): the first test of `draw`,
@@ -1683,6 +1683,29 @@ void ScenePlayer::command(const std::string& text) {
         nextTransition_.flipAngle = static_cast<float>(argNum(args, 2, 0)) * kRad;
         nextTransition_.flipRadius = static_cast<float>(argNum(args, 3, 0));
         nextTransition_.flipFold = static_cast<float>(argNum(args, 4, 90)) * kRad;
+        return;
+    }
+    if (cmd == "rcflip") {
+        if (skipFlag_) return;  // as `rdraw`
+        if (renderTransitionUp()) return;  // as `rdraw`
+        // `rcflip [frames] [w] [h] [angle] [band] [axis] [colour] [from] [to]` (Amakano+'s sscript
+        // 0x07fc96, transition 8): frames default to drawdef's, nothing at 2 or fewer, the effect
+        // runs frames - 2; cells w x h (256 x 256); angle 270 and axis 340 (degrees, builtin 62: x pi
+        // / 180), band 200, colour $ff000000; from / to (0, 45000) only set where the effect sits
+        // among the layers. Native 971 hands them to kcTaskRenderCFlip (Amakano 2 0x592ea0, message
+        // 400) when the next screen is drawn. See StageRenderer::drawCellFlip.
+        const int32_t given = args.size() > 1 ? argNum(args, 1, drawDefFrames_) : drawDefFrames_;
+        if (given <= 2) return;
+        const float kRad = 3.14159274f / 180.0f;
+        nextTransition_.kind = Transition::Kind::CellFlip;
+        nextTransition_.render = true;
+        nextTransition_.frames = static_cast<uint32_t>(given - 2);
+        nextTransition_.flipCellW = std::max(1, argNum(args, 2, 256));
+        nextTransition_.flipCellH = std::max(1, argNum(args, 3, 256));
+        nextTransition_.flipAngle = static_cast<float>(argNum(args, 4, 270)) * kRad;
+        nextTransition_.flipBand = static_cast<float>(argNum(args, 5, 200));
+        nextTransition_.flipAxis = static_cast<float>(argNum(args, 6, 340)) * kRad;
+        nextTransition_.flipColor = static_cast<uint32_t>(argNum(args, 7, static_cast<int32_t>(0xFF000000u)));
         return;
     }
     if (cmd == "wbreak") {
@@ -2726,14 +2749,34 @@ Motion ScenePlayer::mcFade(const std::vector<std::string>& args, uint64_t at, in
     return m;
 }
 
+// `mcdisp <frames>...` (sscript 0x044063 builds mcDisp's parameters: the count, the sum, then each
+// argument as a whole number of frames, and starts it with native 535): shown for the first,
+// hidden for the next, and so on, over and over (mot.int's mcDisp).
+Motion ScenePlayer::mcDisp(const std::vector<std::string>& args, uint64_t at) {
+    Motion m;
+    m.kind = Motion::Kind::Disp;
+    m.loop = true;
+    m.start = at;
+    uint32_t total = 0;
+    for (size_t i = 3; i < args.size(); ++i) {
+        const int32_t d = argNum(args, i, 0);
+        m.keys.push_back({static_cast<float>(d), 0, 0});
+        total += static_cast<uint32_t>(std::max(0, d));
+    }
+    m.period = std::max<uint32_t>(1, total);
+    return m;
+}
+
 namespace {
 
 // `stop` ends an mcfade where it is: the opacity it last set stays; an mccfade's colour too (it
 // writes the object's colour, which stays as it was last written).
-void holdMotionAlpha(Tween& alpha, const std::vector<Motion>& motions, uint64_t now, uint32_t* color = nullptr) {
+void holdMotionAlpha(Tween& alpha, const std::vector<Motion>& motions, uint64_t now, uint32_t* color = nullptr,
+                     bool* visible = nullptr) {
     const MotionState s = evaluate(motions, now);
     if (s.setAlpha >= 0) alpha = Tween::constant(s.setAlpha);
     if (color && s.hasColor) *color = s.color | 0xFF000000u;
+    if (visible && s.setVisible >= 0) *visible = s.setVisible != 0;  // mcdisp's flag stays as last set
 }
 
 // `stop` (sscript 0x038e20 -> native 314 -> cs2.exe 0x789860): every motion of the object gets its
@@ -2748,8 +2791,8 @@ void finishTween(Tween& t, uint64_t now) {
 
 template <class T>
 void stopMotions(T& o, uint64_t now) {
-    if constexpr (std::is_same_v<T, Plane>) holdMotionAlpha(o.alpha, o.motions, now, &o.color);
-    else holdMotionAlpha(o.alpha, o.motions, now);
+    if constexpr (std::is_same_v<T, Plane>) holdMotionAlpha(o.alpha, o.motions, now, &o.color, &o.visible);
+    else holdMotionAlpha(o.alpha, o.motions, now, nullptr, &o.visible);
     for (const auto& m : o.motions) {
         if (m.kind == Motion::Kind::Move && m.loop) {
             o.x = Tween::constant(static_cast<int32_t>(std::lround(m.a[2])));
@@ -3401,6 +3444,10 @@ void ScenePlayer::planeCommand(const std::vector<std::string>& args) {
         m.a[0] = static_cast<float>(argNum(args, 5, 0));
         m.a[1] = static_cast<float>(argNum(args, 3, 0));
         m.a[2] = static_cast<float>(argNum(args, 4, 0));
+        p.motions.push_back(m);
+    } else if (what == "mcdisp") {
+        Motion m = mcDisp(args, at);
+        std::erase_if(p.motions, [](const Motion& o) { return o.kind == Motion::Kind::Disp; });
         p.motions.push_back(m);
     } else if (what == "mcscalecos" || what == "mcscalesin") {
         // `mcscalecos px py pz fromX fromY fromZ toX toY toZ`
@@ -4930,6 +4977,18 @@ void ScenePlayer::imageCommand(Layer layer, const std::vector<std::string>& args
             if (ex) img->x = {x, x + ex, end, 0};
             if (ey) img->y = {y, y + ey, end, 0};
         }
+    } else if (what == "mcrot") {
+        // `mcrot px py pz` (mot.int's mcRot): a turn every |p| frames about x, y and z, the sign
+        // the direction, added to the object's own turn; an image turns about its base point.
+        Motion m = motion(Motion::Kind::Rotate, true, 1);
+        m.a[0] = static_cast<float>(argNum(args, 5, 0));
+        m.a[1] = static_cast<float>(argNum(args, 3, 0));
+        m.a[2] = static_cast<float>(argNum(args, 4, 0));
+        img->motions.push_back(m);
+    } else if (what == "mcdisp") {
+        Motion m = mcDisp(args, at);
+        std::erase_if(img->motions, [](const Motion& o) { return o.kind == Motion::Kind::Disp; });
+        img->motions.push_back(m);
     } else if (what == "mcscalecos" || what == "mcscalesin") {
         Motion m = motion(Motion::Kind::ScaleCos, true, static_cast<uint32_t>(argNum(args, 3, 60)));
         m.a[0] = percent(args.size() > 6 ? args[6] : "", 100);

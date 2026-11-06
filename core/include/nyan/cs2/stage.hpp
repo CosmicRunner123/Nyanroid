@@ -55,7 +55,7 @@ struct Tween {
 // A time-driven offset/scale/rotation animation (`arc`, `mcmove`, `mcarc`, `mcscalecos`, `mcrot`).
 // Values are evaluated at render time from the frame counter.
 struct Motion {
-    enum class Kind : uint8_t { None, Move, Arc, ScaleCos, Rotate, Shake, Settle, Path, Pendulum, ScaleSaw, Fade, AddPos, AddScale, CFade };
+    enum class Kind : uint8_t { None, Move, Arc, ScaleCos, Rotate, Shake, Settle, Path, Pendulum, ScaleSaw, Fade, AddPos, AddScale, CFade, Disp };
     Kind kind = Kind::None;
     bool loop = false;     // mc*: repeats every `period` frames until stopped
     uint64_t start = 0;
@@ -80,6 +80,8 @@ struct Motion {
     // (curve - 1) x change, curve a[5] (Tween::ease), from minus the change to nothing.
     // CFade (mcCFade): the colour's bytes (blue, green, red, alpha: keys[0..3], each {from, to, 0})
     // go from -> to -> from over `period` frames, as mcFade's opacity does, without a hold.
+    // Disp (mcDisp): keys[i][0] the phase lengths in frames, shown, hidden, shown, ... over `period`
+    // (their sum) frames, again and again; it sets the display flag each frame.
     float a[6] = {0, 0, 0, 0, 0, 0};
     // Path: keyframes (frames to get there, x, y). a[0] = 1: positions (`spline`, the engine's
     // cubic spline from a[1], a[2]; `mcspline` round the keys), else offsets from the resting place
@@ -126,6 +128,7 @@ struct MotionState {
     // mcscale sets the scale outright (percent / 100); negative: not set.
     float setScaleX = -1, setScaleY = -1;
     int32_t setAlpha = -1;  // mcfade sets the opacity outright (0..255); negative: not set
+    int32_t setVisible = -1;  // mcdisp sets the display flag (0 / 1); negative: not set
     // mccfade sets the colour outright (0xAARRGGBB; its alpha also goes to setAlpha).
     bool hasColor = false;
     uint32_t color = 0xFFFFFFFF;
@@ -443,7 +446,7 @@ struct MessageWindow {
 struct Stage;
 
 struct Transition {
-    enum class Kind : uint8_t { Cut, Fade, Wipe, Mosaic, PageFlip, Break, FadeMosaic };
+    enum class Kind : uint8_t { Cut, Fade, Wipe, Mosaic, PageFlip, Break, FadeMosaic, CellFlip };
     Kind kind = Kind::Cut;
     uint32_t frames = 0;
     int32_t mosaic = 1;  // Kind::Mosaic / FadeMosaic: largest block size in pixels (`rwmos` / `rfmos <frames> <size> ...`)
@@ -455,6 +458,14 @@ struct Transition {
     // angle: the direction the fold moves (radians), radius: the curl's, fold: how far the page
     // turns over (radians).
     float flipAngle = 0, flipRadius = 0, flipFold = 1.5707964f;
+    // Kind::CellFlip (`rcflip`, cs2.exe kcTaskRenderCFlip): the screen in flipCellW x flipCellH
+    // cells that turn over one after another, the old screen on their fronts and the new one on
+    // their backs, as a line sweeps across; flipAngle and flipAxis (radians) set the sweep's and the
+    // turn's direction, flipBand how far behind the line a cell is turned over, flipColor what
+    // shows behind them.
+    int32_t flipCellW = 256, flipCellH = 256;
+    float flipBand = 200, flipAxis = 0;
+    uint32_t flipColor = 0xFF000000u;
     // Kind::Break (`wbreak`, cs2.exe kcTaskRenderWBreak): the old screen breaks into triangles, two
     // to each breakCellW x breakCellH cell, that fly outwards (up to breakSpeed pixels a frame) and
     // spin (up to breakSpin / 2 degrees a frame about each axis) as they fade.

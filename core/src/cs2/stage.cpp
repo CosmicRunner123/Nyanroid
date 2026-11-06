@@ -326,6 +326,20 @@ MotionState evaluate(const std::vector<Motion>& motions, uint64_t now) {
             s.setAlpha = std::clamp(static_cast<int32_t>(std::lround(m.a[0] + (m.a[1] - m.a[0]) * k)), 0, 255);
             break;
         }
+        case Motion::Kind::Disp: {
+            // mcDisp (mot.int): t = elapsed mod the sum; shown from the start, each phase whose end
+            // t has reached turns it over (`if (acc + d > t) break; acc += d; disp = 1 - disp`).
+            const uint64_t ti = (now - m.start) % std::max<uint64_t>(1, m.period);
+            float acc = 0;
+            int32_t disp = 1;
+            for (const auto& k : m.keys) {
+                if (acc + k[0] > static_cast<float>(ti)) break;
+                acc += k[0];
+                disp = 1 - disp;
+            }
+            s.setVisible = disp;
+            break;
+        }
         case Motion::Kind::CFade: {
             // mcCFade (mot.int): t = elapsed mod P; k = |triangle(t, 2P)|; each byte of the
             // object's colour (blue, green, red, alpha) round(from + (to - from) k), clamped. The

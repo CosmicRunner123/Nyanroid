@@ -302,6 +302,7 @@ private:
     void drawEmoteFade(const cs2::StageImage& img, uint64_t frame, const PlaneXform& plane, float scale, float ox,
                        float oy, float ax, float ay, float sx, float sy, float alpha);
     void composite(const cs2::Stage& stage, uint64_t frame);
+    void drawCellFlip(const cs2::Transition& tr, float t);
     void drawPageFlip(const cs2::Transition& tr, float t);
     void drawBreak(const cs2::Transition& tr, uint64_t elapsed);
     void drawNovelPage(const cs2::MessageWindow& w, const cs2::WindowLayout& L, const Rect& area, const float sizes[5],

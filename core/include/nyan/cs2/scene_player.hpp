@@ -498,6 +498,7 @@ private:
     int32_t argNum(const std::vector<std::string>& args, size_t i, int32_t fallback, int32_t current = 0);
     // `<obj> mcfade <period> <from> <to> [hold]` (args from index 3): the mcFade motion.
     Motion mcFade(const std::vector<std::string>& args, uint64_t at, int32_t current);
+    Motion mcDisp(const std::vector<std::string>& args, uint64_t at);
     // `pend`/`m2pend <frames> <half swings> <x> <y> <z deg>` and `mcpend <frames> <x> <y> <z deg>`.
     Motion pendulum(const std::vector<std::string>& args, bool loop, uint64_t at);
     // `tone <r%> <g%> <b%>` / `tone <name>` (config.int/bgtone.tbl) / bare `tone` (100%).

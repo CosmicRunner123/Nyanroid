@@ -1027,6 +1027,33 @@ void testSpark2() {
     CHECK_EQ(static_cast<int>(rs[0].v[0].alpha), 255);  // faded in over 20, holding
 }
 
+void testDispMotion() {
+    using namespace nyan::cs2;
+    // `pl 3 mcdisp 48 48` (mot.int mcDisp): shown for 48 frames, hidden for 48, over and over;
+    // `mcdisp 10 20 30`: shown 10, hidden 20, shown 30.
+    Motion m;
+    m.kind = Motion::Kind::Disp;
+    m.loop = true;
+    m.start = 5;
+    m.period = 96;
+    m.keys = {{48, 0, 0}, {48, 0, 0}};
+    std::vector<Motion> ms{m};
+    auto at = [&](uint64_t t) { return evaluate(ms, 5 + t).setVisible; };
+    CHECK_EQ(at(0), 1);
+    CHECK_EQ(at(47), 1);
+    CHECK_EQ(at(48), 0);
+    CHECK_EQ(at(95), 0);
+    CHECK_EQ(at(96), 1);
+    ms[0].period = 60;
+    ms[0].keys = {{10, 0, 0}, {20, 0, 0}, {30, 0, 0}};
+    CHECK_EQ(at(9), 1);
+    CHECK_EQ(at(10), 0);
+    CHECK_EQ(at(29), 0);
+    CHECK_EQ(at(30), 1);
+    CHECK_EQ(at(59), 1);
+    CHECK_EQ(evaluate({}, 0).setVisible, -1);
+}
+
 void testCFadeMotion() {
     using namespace nyan::cs2;
     // `pl 4 mccfade 120 $99ffffff $6484eeff` (mot.int mcCFade): every byte from the
@@ -2020,6 +2047,7 @@ int main() {
     testSwordSpark();
     testSArrow();
     testCFadeMotion();
+    testDispMotion();
     testImageMode();
     testKcsNativeCalls();
     testParticleOrder();

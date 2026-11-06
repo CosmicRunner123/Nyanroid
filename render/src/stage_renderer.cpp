@@ -786,14 +786,15 @@ StageRenderer::PlaneXform StageRenderer::planeXform(const cs2::Stage& stage, int
     xf.alpha = (ms.setAlpha >= 0 ? ms.setAlpha : std::clamp(p.alpha.value(frame), 0, 255)) / 255.0f;
     // An mccfade writes the colour outright, its alpha the opacity (setAlpha above).
     xf.color = ms.hasColor ? (ms.color | 0xFF000000u) : p.color;
-    xf.visible = p.visible;
+    xf.visible = ms.setVisible >= 0 ? ms.setVisible != 0 : p.visible;  // an mcdisp sets it
     return xf;
 }
 
 void StageRenderer::drawImage(const cs2::StageImage& img, uint64_t frame, const PlaneXform& plane, float scale,
                               float ox, float oy, float shiftX, float shiftY, ImageMask* mask) {
-    if (!img.visible || !plane.visible) return;
+    if (!plane.visible) return;
     cs2::MotionState ms = cs2::evaluate(img.motions, frame);
+    if (!(ms.setVisible >= 0 ? ms.setVisible != 0 : img.visible)) return;  // an mcdisp sets it
     float alpha = (ms.setAlpha >= 0 ? ms.setAlpha : std::clamp(img.alpha.value(frame), 0, 255)) / 255.0f * plane.alpha *
                   ((plane.color >> 24) & 0xFF) / 255.0f;
     if (alpha <= 0 && !mask) return;
@@ -848,6 +849,9 @@ void StageRenderer::drawImage(const cs2::StageImage& img, uint64_t frame, const 
         return;
     }
 
+    const std::array<float, 4> turn = ms.rotation != 0 || ms.rotX != 0 || ms.rotY != 0
+                                          ? cs2::rotation2x2(ms.rotX, ms.rotY, ms.rotation)
+                                          : std::array<float, 4>{1, 0, 0, 1};
     // Image-local rect (relative to its anchor) -> plane-local -> screen.
     auto emit = [&](Mode mode, GLuint tex, float rx, float ry, float rw, float rh, uint32_t color) {
         Vec2 c[4];
@@ -870,8 +874,10 @@ void StageRenderer::drawImage(const cs2::StageImage& img, uint64_t frame, const 
                 xs[k] = x, ys[k] = y;
             }
         }
+        // A turn (`mcrot`): scale, then the engine's RotX * RotY * RotZ flattened, about the base point.
         for (int k = 0; k < 4; ++k) {
-            Vec2 pl = plane.apply(ax + xs[k] * sx, ay + ys[k] * sy);
+            const float lx = xs[k] * sx, ly = ys[k] * sy;
+            Vec2 pl = plane.apply(ax + lx * turn[0] + ly * turn[2], ay + lx * turn[1] + ly * turn[3]);
             c[k] = {ox + pl.x * scale, oy + pl.y * scale};
         }
         quadCorners(mode, tex, c, 0, 0, 1, 1, color, alpha);
@@ -1877,7 +1883,8 @@ void StageRenderer::composite(const cs2::Stage& stage, uint64_t frame) {
     // the new screen whole, then the old one's pieces.
     const bool pageFlip = kind != 0 && tr.kind == cs2::Transition::Kind::PageFlip;
     const bool breaking = kind != 0 && tr.kind == cs2::Transition::Kind::Break;
-    if (pageFlip || breaking) kind = 0;
+    const bool cellFlip = kind != 0 && tr.kind == cs2::Transition::Kind::CellFlip;
+    if (pageFlip || breaking || cellFlip) kind = 0;
     const Texture* mask = kind == 2 && !tr.mask.empty() ? texture(tr.mask) : nullptr;
 
     glBindFramebuffer(GL_FRAMEBUFFER, display_.fbo);
@@ -1893,7 +1900,7 @@ void StageRenderer::composite(const cs2::Stage& stage, uint64_t frame) {
     glUniform1i(uPrev_, 0);
     glUniform1i(uNext_, 1);
     glUniform1i(uMask_, 2);
-    glUniform1f(uT_, pageFlip || breaking ? 1.0f : t);
+    glUniform1f(uT_, pageFlip || breaking || cellFlip ? 1.0f : t);
     glUniform1i(uKind_, kind);
     if (kind == 4) {
         // kcTaskRenderFMosaic (cs2.exe 0x504a30): one level for each frame i where the block size
@@ -1921,6 +1928,7 @@ void StageRenderer::composite(const cs2::Stage& stage, uint64_t frame) {
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glActiveTexture(GL_TEXTURE0);
     if (pageFlip) drawPageFlip(tr, t);
+    if (cellFlip) drawCellFlip(tr, t);
     if (breaking) drawBreak(tr, frame - tr.start);
     displayed_ = true;
 }
@@ -2035,6 +2043,79 @@ void StageRenderer::drawBreak(const cs2::Transition& tr, uint64_t elapsed) {
         for (const auto& v : t) batch_.push_back({v.x, v.y, v.u, v.v, 1, 1, 1, alpha});
     }
     flush();
+}
+
+void StageRenderer::drawCellFlip(const cs2::Transition& tr, float t) {
+    // cs2.exe kcTaskRenderCFlip (Amakano 2). On start (message 400, 0x592ea0) the screen is cut into
+    // w x h cells (0x5925a0), and their corners and centres are turned by sweep = angle + axis
+    // about the screen's centre (0x592370: x cos + y sin, y cos - x sin, 0x60fc00's turn); the line
+    // runs from the largest turned centre y to the smallest less the band. Each frame (0x5932e0) a
+    // cell whose centre is d past the line is turned over by min(d / band, 1) x pi: none, the old
+    // screen flat; up to pi / 2 the old screen's cell, from there the new screen's cell by that
+    // less pi; pi, the new screen flat. A turn takes the corners relative to the cell's centre,
+    // turns them by -axis, about x by the angle (0x60fae0: y cos, z = -y sin), back by axis, sees
+    // them from 2000 in front (x and y times 2000 / (2000 + z), 0x608880 / 0x60fe40), adds the
+    // centre and turns back by -sweep. The draw (0x593080) fills the screen with the colour, then the
+    // old screen's cells, then the new one's.
+    const float W = static_cast<float>(opt_.virtualWidth), H = static_cast<float>(opt_.virtualHeight);
+    const float cx = W * 0.5f, cy = H * 0.5f;
+    const int cw = std::max(1, tr.flipCellW), ch = std::max(1, tr.flipCellH);
+    const int cols = (static_cast<int>(W) + cw - 1) / cw, rows = (static_cast<int>(H) + ch - 1) / ch;
+    const float kPi = 3.14159274f;
+    struct P { float x, y; };
+    auto turn = [](P p, float a) { const float c = std::cos(a), s = std::sin(a); return P{p.x * c + p.y * s, p.y * c - p.x * s}; };
+    const float sweep = tr.flipAngle + tr.flipAxis;
+    auto turned = [&](float x, float y) { return turn(P{x - cx, y - cy}, sweep); };
+    float maxY = -10000.0f, minY = 10000.0f;
+    for (int j = 0; j < rows; ++j) {
+        for (int i = 0; i < cols; ++i) {
+            const P c = turned(static_cast<float>(i * cw) + cw * 0.5f, static_cast<float>(j * ch) + ch * 0.5f);
+            maxY = std::max(maxY, c.y), minY = std::min(minY, c.y);
+        }
+    }
+    const float band = std::max(1.0f, tr.flipBand);
+    const float line = t * ((minY - band) - maxY) + maxY;
+    struct V { float x, y, u, v; };
+    std::vector<V> front, back;
+    for (int j = 0; j < rows; ++j) {
+        for (int i = 0; i < cols; ++i) {
+            const float x0 = static_cast<float>(i * cw), y0 = static_cast<float>(j * ch);
+            const float x1 = std::min(W, x0 + cw), y1 = std::min(H, y0 + ch);
+            const P c = turned(x0 + cw * 0.5f, y0 + ch * 0.5f);
+            float a = 0;
+            if (c.y >= line) a = c.y - line >= band ? kPi : (c.y - line) / band * kPi;
+            const bool old = a < kPi * 0.5f;
+            const float by = old ? a : a - kPi;  // the angle the shown face is turned by
+            auto place = [&](float x, float y) {
+                V out{x, y, x / W, 1.0f - y / H};
+                if (a == 0 || a >= kPi) return out;
+                const P v = turned(x, y);
+                P d = turn(P{v.x - c.x, v.y - c.y}, -tr.flipAxis);
+                const float z = -d.y * std::sin(by);
+                d.y *= std::cos(by);
+                d = turn(d, tr.flipAxis);
+                const float s = std::max(0.0f, 2000.0f / (2000.0f + z));
+                const P back = turn(P{d.x * s + c.x, d.y * s + c.y}, -sweep);
+                out.x = back.x + cx, out.y = back.y + cy;
+                return out;
+            };
+            const V a0 = place(x0, y0), b0 = place(x1, y0), c0 = place(x0, y1), d0 = place(x1, y1);
+            auto& to = old ? front : back;
+            to.insert(to.end(), {a0, b0, c0, b0, d0, c0});
+        }
+    }
+    begin(static_cast<int>(W), static_cast<int>(H));
+    glDisable(GL_BLEND);
+    const Vec2 screen[4] = {{0, 0}, {W, 0}, {W, H}, {0, H}};
+    quadCorners(Mode::Solid, 0, screen, 0, 0, 1, 1, tr.flipColor | 0xFF000000u, 1.0f);
+    flush();
+    for (const auto* cells : {&front, &back}) {
+        batchMode_ = Mode::Texture;
+        batchTex_ = cells == &front ? prev_.tex : scene_.tex;
+        for (const auto& v : *cells) batch_.push_back({v.x, v.y, v.u, v.v, 1, 1, 1, 1});
+        flush();
+    }
+    glEnable(GL_BLEND);
 }
 
 void StageRenderer::drawPageFlip(const cs2::Transition& tr, float t) {
