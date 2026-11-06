@@ -198,9 +198,9 @@ void Options::build() {
                             static_cast<float>(sy), barWidth(value, false), 24);
                 in.setArea(1, 10 + row * 10 + 2, sx + 0x80, sy + 0x70, 0x150, 0x18, true);
                 cells(row, kCell + row, 0x161, 2, 56, 40, 0x38, 0x28, 0x1064);
-                // On / off.
+                // On / off: the cells at +0x1c / +0x24 (0x419170: from 0x4bf91c).
                 for (int k = 3; k < 5; ++k) {
-                    int x = r.c[k * 2 - 2], y = r.c[k * 2 - 1];
+                    int x = r.c[k * 2], y = r.c[k * 2 + 1];
                     int obj = kSlider + row + 10 * (k - 2);
                     gfx.makeImage(obj, 0x161, 0x1064, false);
                     gfx.setRect(obj, static_cast<float>(x + 0x80), static_cast<float>(y + 0x70), static_cast<float>(x),
@@ -395,7 +395,7 @@ int Options::step() {
                         int flag = row == 2 ? s.allSound : row == 3 ? s.bgm : row == 4 ? s.se : s.voice;
                         bool current = flag == 0 ? col == 4 : col == 3;
                         if (!current) {
-                            int x = r.c[col * 2 - 2], y = r.c[col * 2 - 1];
+                            int x = r.c[col * 2], y = r.c[col * 2 + 1];  // 0x41f800: 0x4bf904 + col * 8
                             gfx.setVisible(kHighlight, true);
                             gfx.setRect(kHighlight, static_cast<float>(x + 0x80), static_cast<float>(y + 0x70),
                                         static_cast<float>(x), static_cast<float>(y), 80, 16);
