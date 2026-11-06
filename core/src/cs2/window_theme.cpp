@@ -343,6 +343,7 @@ std::optional<WindowLayout> buildLayout(const AssetIndex& assets, const std::str
             continue;
         }
         if (tok.size() >= 5 && tok[0] == textObj && tok[1] == "layout" && tok[2] == "move") {
+            L.moveX = std::atoi(tok[3].c_str());
             L.moveY = std::atoi(tok[4].c_str());
             continue;
         }

@@ -45,7 +45,8 @@ struct WindowLayout {
     int32_t marginTop = 8, marginRight = 48;
     int32_t lineSpacing = 8;
     int32_t rubySize = 0;  // `str layout rsize`: ruby space reserved above each line
-    int32_t moveY = -1;    // `str layout move <x> <y>`: gap between lines (-1: not given)
+    int32_t moveX = -1;    // `str layout move <x> <y>`: space after each character (-1: not given)
+    int32_t moveY = -1;    // and the gap between lines
     int32_t indent = 0;    // `str layout indent 1`: lines hang under a message's opening bracket
     // Face window: `fw` image at (x, y) is anchored at (faceX + x, faceY + y), clipped to faceClip.
     int32_t faceX = 0, faceY = 0;

@@ -479,10 +479,12 @@ private:
     std::map<std::string, int32_t> nameTable_;  // speaker name (UTF-8) -> id
     bool nameTableLoaded_ = false;
     std::vector<std::string> fontFaces_;        // startup.xml FONT/face f00, f01, ...
+    bool launcherFontChoice_ = false;           // startup.xml CONFIG_B/font
     struct FontCandidate {
         std::string name;
         bool bundled;  // in the font archive or font/ folder (the engine's own fonts)
         std::function<Bytes()> read;
+        bool beside = false;  // in the game's own folder, beside its exe (a patch's font)
     };
     std::vector<FontCandidate> fontCandidates() const;
     // The font files a game can use: its archives', its font/ folder's and its own folder's, the

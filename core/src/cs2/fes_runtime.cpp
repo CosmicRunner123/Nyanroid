@@ -446,12 +446,14 @@ void FesInstance::createObjects() {
             o.uid = 1000 + static_cast<int32_t>(objects_.size());
             o.index = i;
             o.base = d.name;
+            o.element = d.count > 0;
+            o.named = !o.element;
             byName_[o.name] = objects_.size();
             objects_.push_back(std::move(o));
         }
     }
     for (const auto& row : script_.rows) {
-        for (Object* o : resolve(row.object)) applyRow(*o, row.values);
+        for (Object* o : resolve(row.object)) applyRow(*o, row.values);  // resolve marks an element it names
     }
     // An image or button without a PL has no plane of its own (the engine leaves the name empty). In
     // the newer engines (2.6.1.80 on) it draws at the origin of video memory: a plane whose VRAM is
@@ -459,6 +461,12 @@ void FesInstance::createObjects() {
     // title buttons of Love's Sweet Garnish and Cyanotype's titlea, in pl_bg with the background;
     // Cyanotype's name plate in the window's pl). Older engines draw them on the screen: Fruit's
     // title has an empty, hidden `pl[0]` at 0,0 and its plane-less buttons still show and click.
+    // Elements nothing names in an old engine (fitted, see namedElementsOnly_): Ikinari Anata ni
+    // Koishiteiru's window shows `btn` whole, but gives ids to all its buttons except 3 and 4; drawn
+    // at index 0 they show the window picture's frame 0, an opaque black layer the size of the
+    // window (the layout's base, also its plane's SIZE2), which PC screenshots do not show.
+    const uint64_t engine = host_ ? host_->engineFileVersion() : 0;
+    namedElementsOnly_ = engine != 0 && engine < 0x0002000600000000ull;
     vramPlanes_ = host_ && host_->engineFileVersion() >= 0x0002000600010050ull;
     if (!vramPlanes_) return;
     // Only a plane there that holds images of its own counts: shared include files declare empty
@@ -556,7 +564,10 @@ std::vector<FesInstance::Object*> FesInstance::resolve(const std::string& ref) {
     if (open != std::string::npos && ref.back() == ']') {
         std::string inner = ref.substr(open + 1, ref.size() - open - 2);
         int32_t idx = num(inner);
-        if (Object* o = find(ref.substr(0, open) + "[" + std::to_string(idx) + "]")) out.push_back(o);
+        if (Object* o = find(ref.substr(0, open) + "[" + std::to_string(idx) + "]")) {
+            o->named = true;
+            out.push_back(o);
+        }
         // Element 0 of an object declared without an array is the object (Amakano 2's title declares
         // one image that way and shows it as element 0).
         else if (idx == 0) {
@@ -2372,7 +2383,7 @@ std::vector<FesQuad> FesInstance::draw(uint64_t frame) const {
         // Only ones the script shows (a DISP column, a `disp` or `fade`): plane-less images it
         // never shows are templates, such as Fruit's save-panel date bar, which the
         // panels draw from and which would otherwise flash red while the menu fades in.
-        else if ((o.type == "IMAGE" || o.type == "CIMAGE") && o.plane.empty() && !o.mask && (o.colorFill || o.frame() >= 0) &&
+        else if ((o.type == "IMAGE" || o.type == "CIMAGE") && o.plane.empty() && !o.mask && !unmade(o) && (o.colorFill || o.frame() >= 0) &&
                  (o.dispColumn || o.dispCommanded || shownByScript_.count(o.base)))
             containers.push_back(&o);
     }
@@ -2661,7 +2672,7 @@ std::vector<FesQuad> FesInstance::draw(uint64_t frame) const {
                 for (const auto& o : objects_) {
                     if ((isDrawableType(o.type) || o.type == "SLIDER" || o.type == "SCROLL" || o.type == "SCROLL2" ||
                          o.type == "SAVEPANEL" || o.type == "IMGWND") && o.disp &&
-                        !o.mask && inPlane(o)) {
+                        !o.mask && !unmade(o) && inPlane(o)) {
                         items.push_back(&o);
                     }
                 }
@@ -3077,7 +3088,7 @@ FesInstance::StringLayout FesInstance::stringLayout(const std::string& object) c
     if (!o) return out;
     if (o->sizesSet) std::copy(std::begin(o->textSizes), std::end(o->textSizes), out.sizes);
     if (o->rubySet) out.ruby = o->rubySize;
-    if (o->moveSet) out.moveY = o->moveY;
+    if (o->moveSet) out.moveX = o->moveX, out.moveY = o->moveY;
     if (o->marginSet) std::copy(std::begin(o->margin), std::end(o->margin), out.margin);
     if (o->indentSet) out.indent = o->indent;
     if (o->scrollSet) out.scrollType = o->scrollType;
@@ -3219,7 +3230,7 @@ const FesInstance::Object* FesInstance::hitTest(float x, float y) const {
     int64_t bestPri = INT64_MIN;
     for (const auto& o : objects_) {
         // Hidden-but-enabled buttons are clickable: scripts use them as hit maps over visible labels.
-        if (o.type != "BUTTON" || !o.enable) continue;
+        if (o.type != "BUTTON" || !o.enable || unmade(o)) continue;
         // Buttons outside any plane are invisible hit maps in screen coordinates.
         auto pit = byName_.find(o.plane);
         const Object* c = pit == byName_.end() ? nullptr : &objects_[pit->second];

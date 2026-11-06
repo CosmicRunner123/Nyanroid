@@ -368,6 +368,7 @@ private:
     bool textAround_ = true, textRightDown_ = true;
     FontAtlas* cur_ = nullptr;   // the font text is being laid out / drawn in
     bool proportional_ = false;  // that text uses glyph advances, not the cell grid
+    float letterSpacing_ = 0;    // window pixels after each character (`layout move <x>`)
     bool hanging_ = false;
     // For the next layoutMessage: the right margin, room a word or a closing character may still
     // take at a line's end, and the text object's line-break sets (null: the engine's defaults).

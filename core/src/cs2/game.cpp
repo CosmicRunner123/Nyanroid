@@ -400,6 +400,8 @@ void Game::loadConfig() {
             if (!f->text.empty()) fontFaces_.push_back(f->text);
         }
     }
+    // The launcher's settings (cs2conf.dll) offer a font choice (CONFIG_B lists the options it shows).
+    launcherFontChoice_ = doc->intValue("CONFIG_B/font", 0) != 0;
     readEnabled_ = doc->intValue("GAME/read/enable", 0) != 0;
     fontProportional_ = doc->intValue("FONT/proportional", 1) != 0;  // 0x62c3e0, default 1
     // FONT/bold (Nekopara cs2.exe 0x7202f0, startup settings +0xfd18, 0 unless given): the default
@@ -2428,6 +2430,7 @@ std::vector<Game::FontCandidate> Game::fontCandidates(const AssetIndex& assets, 
     };
     std::vector<FontCandidate> candidates;
     for (const auto& archive : assets.archives()) {
+        if (archive->loose()) continue;  // the font/ folder: below
         for (const auto& e : archive->entries()) {
             if (!isFont(e.name)) continue;
             const KifArchive* a = archive.get();
@@ -2446,7 +2449,7 @@ std::vector<Game::FontCandidate> Game::fontCandidates(const AssetIndex& assets, 
         if (isFont(n)) candidates.push_back({n, false, [f, n] {
             auto file = f->open(n);
             return file ? file->readAll() : Bytes{};
-        }});
+        }, true});
     }
     // User font folders: system fonts the game expects from Windows (e.g. MS Gothic).
     for (const auto& dir : dirs) {
@@ -2492,9 +2495,10 @@ std::vector<std::string> Game::missingFonts(const GameFolder& folder, const std:
     }
     faces = std::move(unique);
     if (faces.empty()) return {};
-    // As loadFont finds the message font: any of the faces, else the engine's own default.ttf.
+    // As loadFont finds the message font: any of the faces, else the engine's own default.ttf, else
+    // a font beside the game (a patch's).
     for (const auto& c : fontCandidates(assets, folder, fontDirs, {})) {
-        if (c.bundled && toLowerAscii(c.name) == "default.ttf") return {};
+        if ((c.bundled && toLowerAscii(c.name) == "default.ttf") || c.beside) return {};
         const Bytes data = c.read();
         for (int face = 0; face < fontFaceCount(data); ++face) {
             for (const auto& want : faces) {
@@ -2571,6 +2575,21 @@ Bytes Game::loadFont(int* faceOut, const std::string& wanted, int32_t weight, bo
         }
         return best;
     }
+    // 0. A font the game keeps beside its exe when the launcher's settings offer a font choice: a
+    // patch's font, which its players pick there (Ikinari Anata ni Koishiteiru's English patch ships
+    // its font so and turns the launcher's font choice on; PC screenshots show it). Nyanroid has no
+    // launcher, so the patch's font is taken as picked. (A PC left alone starts on the first face
+    // startup.xml names that it has.)
+    if (launcherFontChoice_) {
+        for (const auto& c : candidates) {
+            if (!c.beside) continue;
+            Bytes data = c.read();
+            if (fontFaceCount(data) <= 0) continue;
+            if (player_.log) player_.log("font: " + c.name + " (beside the game, as picked in the launcher)");
+            chose(data, 0);
+            return data;
+        }
+    }
     // 1. The face startup.xml asks for, by any of the font's names.
     std::vector<std::optional<Bytes>> loaded(candidates.size());
     for (const auto& want : fontFaces_) {
@@ -2602,6 +2621,15 @@ Bytes Game::loadFont(int* faceOut, const std::string& wanted, int32_t weight, bo
             chose(data, 0);
             return data;
         }
+    }
+    // 3. A font the game keeps beside its exe (see 0), before the platform's.
+    for (const auto& c : candidates) {
+        if (!c.beside) continue;
+        Bytes data = c.read();
+        if (fontFaceCount(data) <= 0) continue;
+        if (player_.log) player_.log("font: " + c.name + " (beside the game; the configured faces are missing)");
+        chose(data, 0);
+        return data;
     }
     if (player_.log) player_.log("font: configured face not found; using the platform font");
     return {};

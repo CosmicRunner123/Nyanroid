@@ -280,6 +280,8 @@ public:
         std::map<int32_t, int32_t> blockColor;
         int32_t saveSlot = -1;
         int32_t index = 0;      // element index within its array (`@` in handlers)
+        bool element = false;   // one of a declared array's elements
+        bool named = true;      // an element an #OBJECT row or a command named by its index
         std::string base;       // array name without index ("btn" for "btn[3]")
 
         bool container() const;
@@ -351,7 +353,7 @@ public:
     struct StringLayout {
         int32_t sizes[5] = {-1, -1, -1, -1, -1};
         int32_t ruby = -1;
-        int32_t moveY = -1;
+        int32_t moveX = -1, moveY = -1;
         int32_t margin[4] = {-1, -1, -1, -1};  // left top right bottom
         int32_t indent = -1;
         int32_t scrollType = -1, wipeWidth = -1;
@@ -569,6 +571,10 @@ private:
     std::set<std::string> hostSkipped_;
     int32_t textEndX_ = 0, textEndY_ = 0;
     bool proportionalReset_ = false;
+    // An engine older than 2.6 (Ikinari Anata ni Koishiteiru's): an array element no #OBJECT row or
+    // command names by its index is not drawn (fitted to PC screenshots: its exe is packed).
+    bool namedElementsOnly_ = false;
+    bool unmade(const Object& o) const { return namedElementsOnly_ && o.element && !o.named; }
     bool vramPlanes_ = false;  // newer engine: planes show areas of video memory (plane-less objects, shared VRAM)  // the script is for the string engine whose `reset` is proportional
     int32_t scrollFlags_[4] = {0, 0, 0, 0};
     uint64_t scrollAt_ = 0;

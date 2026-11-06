@@ -2211,7 +2211,7 @@ std::vector<StageRenderer::LaidGlyph> StageRenderer::layoutMessage(const cs2::Me
     // CatSystem2 lays text out on a fixed grid: a full-width character occupies one cell of
     // the font size, a half-width (ASCII/half-width kana) character half a cell. Glyphs are
     // centred in their cell.
-    auto advanceOf = [&](const Item& it) {
+    auto cellOf = [&](const Item& it) {
         float cell = it.size * viewScale_;
         // Proportional text (`layout fontfix 0`): each glyph its own advance, rounded to whole pixels
         // as the engine's FreeType renderer does (Yukikoi's English lines measure exactly so).
@@ -2226,6 +2226,7 @@ std::vector<StageRenderer::LaidGlyph> StageRenderer::layoutMessage(const cs2::Me
         // half-width letters are the same either way).
         return std::max(std::floor((it.size + 1.0f) / 2.0f) * viewScale_, std::round(cur_->glyph(it.cp, it.px).advance));
     };
+    auto advanceOf = [&](const Item& it) { return cellOf(it) + letterSpacing_ * viewScale_; };
     // `layout indent` (grisaia.exe 0x54a670 with 0x549ba0 / 0x549af0): when the text opens with a
     // bracket, every later line (wrapped or after a newline) starts that bracket's width in, unless
     // it begins with a bracket itself. The engine's sets: （［｛「『([{｢, and the same without 『.
@@ -2651,6 +2652,10 @@ void StageRenderer::drawUi(const cs2::Stage& stage, uint64_t frame) {
             if (L) {
                 cur_ = atlasFor(textFont_);
                 proportional_ = textProportional_;
+                // `layout move <x> <y>`: x pixels after each character (fitted: Ikinari Anata ni
+                // Koishiteiru's `move 2 7`, the only non-zero x, puts its half-width letters 12 pixels
+                // apart at size 19 on PC screenshots; every other game says 0).
+                letterSpacing_ = static_cast<float>(std::max(0, liveLayout_.moveX >= 0 ? liveLayout_.moveX : L->moveX));
                 hanging_ = (liveLayout_.indent >= 0 ? liveLayout_.indent : L->indent) != 0;
                 wrapSlack_ = textSlack;
                 kinsoku_ = liveLayout_.kinsokuSet ? liveLayout_.kinsoku : nullptr;
@@ -2704,6 +2709,7 @@ void StageRenderer::drawUi(const cs2::Stage& stage, uint64_t frame) {
             hanging_ = false;
             wrapSlack_ = 0;
             kinsoku_ = nullptr;
+            letterSpacing_ = 0;
         }
         if (L && windowQuads_) drawWindowQuads(true);  // what the script puts over its text
     }
